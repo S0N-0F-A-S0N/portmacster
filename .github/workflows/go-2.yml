@@ -1,0 +1,91 @@
+name: Go
+
+on:
+  push:
+    paths:
+      - '**.go'
+      - 'cmds/**'
+      - 'runtime/**'
+      - 'service/**'
+      - 'spn/**'
+    branches:
+      - master
+      - develop
+
+  pull_request:
+    paths:
+      - '**.go'
+      - 'cmds/**'
+      - 'runtime/**'
+      - 'service/**'
+      - 'spn/**'
+    branches:
+      - master
+      - develop
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup caching
+      uses: actions/cache@v3
+      with:
+        path: ~/.earthly
+        key: earthly-cache-${{ runner.os }}-v0.8.0
+        restore-keys: |
+          earthly-cache-${{ runner.os }}-
+
+    - name: Set up authentication for GHCR
+      env:
+        CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+      run: echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
+
+    - name: Handle git tags gracefully
+      run: git describe --tags --first-parent --abbrev=0 || echo "no-tags"
+
+    - name: Run your steps
+  lint:
+    name: Linter
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '^1.21'
+        cache: false
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: v1.64.6
+        only-new-issues: true
+        args: -c ./.golangci.yml --timeout 15m
+
+    - name: Run go vet
+      run: go vet ./...
+
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: earthly/actions-setup@v1
+      with:
+        version: v0.8.0
+    - uses: actions/checkout@v4
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run Go Tests & Build
+      run: earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +go-ci
