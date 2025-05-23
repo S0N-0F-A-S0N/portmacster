@@ -16,6 +16,10 @@ import Foundation
     func processNewFlow(bundleID: String,
                         sourceIP: String,
                         destinationIP: String,
+                        sourcePort: Int,
+                        destinationPort: Int,
+                        protocol: Int,
+                        auditToken: Data, // audit_token_t will be passed as Data
                         completionHandler: @escaping (Bool) -> Void)
 
     // Future methods for sending packet data, configuration updates, etc., can be added here.
@@ -31,14 +35,15 @@ public struct FlowDetails: Codable {
     let bundleID: String?
     let sourceIP: String
     let destinationIP: String
-    let sourcePort: Int?
-    let destinationPort: Int?
-    let protocolType: String? // e.g., "TCP", "UDP"
+    let sourcePort: Int
+    let destinationPort: Int
+    let protocolType: Int // e.g., IPPROTO_TCP, IPPROTO_UDP
+    let auditToken: Data? // Optional if it cannot always be retrieved
     // Add other relevant fields
 }
 
 // The protocol method would then look like:
-// func processFlowDetails(_ flowDetails: FlowDetails, completionHandler: @escaping (Bool) -> Void)
+// func processDetailedFlow(_ flowDetailsData: Data, completionHandler: @escaping (Bool) -> Void)
 */
 
 // Service name for the XPC connection. This should be unique.

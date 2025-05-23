@@ -184,7 +184,7 @@ func Resolve(ctx context.Context, q *Query) (rrCache *RRCache, err error) {
 			case !rrCache.Expired():
 				// Return non-expired cached entry immediately.
 				return rrCache, nil
-			case rrCache.RCode == dns.RcodeSuccess && useStaleCache():
+			case useStaleCache():
 				// Return expired cache if we should use stale cache entries,
 				// but start an async query instead.
 				log.Tracer(ctx).Tracef(

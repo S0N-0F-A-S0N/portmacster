@@ -1,12 +1,51 @@
-# macOS Network Extension for Portmaster
+# Portmaster macOS Interception Module
 
-This directory contains the source code for the Portmaster Network Extension on macOS. This extension utilizes the NetworkExtension framework to intercept and manage network traffic.
+This directory contains the source code and documentation for Portmaster's network interception capabilities on macOS. This module utilizes Apple's NetworkExtension framework (specifically `NEPacketTunnelProvider`) for traffic interception and an XPC Service for communication between the extension and the Portmaster Go core.
 
-## Files
+## Overview of Components
 
-- `PortmasterTunnelProvider.swift`: Implements the core logic of the `NEPacketTunnelProvider` system extension. This file handles the lifecycle of the packet tunnel, processes network packets, and includes basic logging for intercepted traffic and source application identification.
-- `PortmasterTunnelProvider.entitlements`: Specifies the capabilities and permissions required by the network extension.
-- `macos-bridge.h`: Serves as a bridging header for interoperability between Swift and Objective-C code, or for CGo integration if direct C/Go interaction is needed.
+The macOS interception mechanism consists of several key components:
+
+1.  **Swift Network Extension (`PortmasterTunnelProvider.swift`, `PortmasterTunnelProvider.entitlements`)**:
+    *   A System Extension (`NEPacketTunnelProvider`) that runs in a sandboxed environment.
+    *   Location: `service/firewall/interception/macos/`
+    *   Source files for the extension.
+    *   Intercepts network packets system-wide.
+    *   Extracts basic flow information (BundleID of the source app, source/destination IPs, protocol type, source/destination ports, and the source application's `audit_token_t`).
+    *   Acts as an XPC client to send this flow data (including the audit token as `Data`) to the Objective-C XPC Service.
+    *   **Build Process**: The `Earthfile`'s `kext-build-macos` target orchestrates the staging of these files and executes the `build_extension.sh` script. This script currently simulates a build process.
+
+2.  **XPC Service Interface (`PortmasterXPCServicable.swift`)**:
+    *   Defines the Swift protocol for communication between the Network Extension and the XPC service.
+    *   Location: `service/firewall/interception/macos/`
+    *   The `processNewFlow` method in this protocol now includes parameters for `sourcePort`, `destinationPort`, `protocol`, and `auditToken` (as `Data`).
+
+3.  **Objective-C XPC Service (`xpcservice/macos-xpc-service/`)**:
+    *   Acts as an intermediary between the sandboxed Network Extension and the Portmaster Go core.
+    *   Source Location: `service/firewall/interception/macos/xpcservice/macos-xpc-service/`
+    *   Implements the updated `PortmasterXPCServicable` protocol, receiving the new port, protocol, and audit token information.
+    *   Connects to a Unix Domain Socket provided by the Go core.
+    *   Serializes received flow data to JSON and sends it over the Unix Domain Socket.
+    *   **Build Process**: The `Earthfile`'s `xpc-service-macos` target orchestrates the staging of these files and executes the `build_xpc_service.sh` script. This script currently simulates a build process.
+
+4.  **Go IPC Server (`ipc_server_darwin.go`)**:
+    *   Part of the Portmaster Go application (compiled for macOS).
+    *   Location: `service/firewall/interception/macos/`
+    *   Listens on a Unix Domain Socket (default: `/tmp/portmaster_ipc.sock`).
+    *   Receives JSON-formatted flow data from the Objective-C XPC Service.
+    *   Deserializes the data and integrates it into the main Portmaster firewall logic (`firewall.FilterConnection`).
+
+5.  **Core Go Firewall Logic Integration**:
+    *   The `processMacOSFlowData` function in `ipc_server_darwin.go` adapts the received flow data to create a `network.Connection` object, which is then processed by the Portmaster firewall engine.
+
+6.  **Placeholder Containing App (`macos-app-placeholder/`)**:
+    *   A minimal directory structure (containing an `Info.plist`) that represents a macOS application.
+    *   Location: `macos-app-placeholder/` (at the repository root).
+    *   This is used by the `Earthfile` build targets (`kext-build-macos`, `xpc-service-macos`) to provide a conceptual context for building the System Extension and XPC Service, as these components are typically bundled within a main application. It is not a fully functional app and its `Info.plist` is primarily for satisfying structural expectations of build tools.
+
+7.  **Build Scripts**:
+    *   `service/firewall/interception/macos/build_extension.sh`: Placeholder script intended to house `xcodebuild` commands for compiling and packaging the Network Extension. Currently simulates a build.
+    *   `service/firewall/interception/macos/xpcservice/build_xpc_service.sh`: Placeholder script intended to house `xcodebuild` commands for compiling and packaging the XPC Service. Currently simulates a build.
 
 ## Entitlements
 
@@ -22,8 +61,25 @@ The following entitlements are required for the `PortmasterTunnelProvider` syste
     - Value: `true` (typically)
     - Purpose: The containing application is usually sandboxed. If it needs to communicate with the system extension or perform privileged operations (like installing the extension or advanced process info gathering), it may need specific sandbox exceptions or a privileged helper tool.
     - *Note for the extension itself:* System extensions run in their own sandboxes with restricted access. Their capabilities are primarily defined by their NetworkExtension type and the entitlements listed here.
+- **`com.apple.developer.networking.vpn.api`**: (Array of Strings, for the containing app)
+    - Value: `app-proxy`, `packet-tunnel` (include `packet-tunnel` if the app directly manages the tunnel provider, `app-proxy` if it uses NEAppProxyProvider).
+    - Purpose: Allows the application to control and manage Network Extension configurations.
+- **App Group Entitlement (e.g., `group.com.safing.portmaster`)**:
+    - Required for both the main application and the XPC service if they need to share data via an App Group container (e.g., for a more secure Unix Domain Socket path).
+    - **TODO**: Define and use an App Group for shared resources like the IPC socket.
+    - **TODO**: Ensure the main application's entitlements request `com.apple.developer.networking.vpn.api` and any necessary App Group entitlements.
 
-The `PortmasterTunnelProvider.entitlements` file has been updated to include these.
+The `PortmasterTunnelProvider.entitlements` file has been updated to include `com.apple.developer.networking.networkextension` and `com.apple.developer.system-extension.install`. Other entitlements are typically set in the main application's `.entitlements` file.
+
+## Code Signing & Provisioning
+
+- **Apple Developer ID**: All components (main application, System Extension, XPC Service) must be signed with an Apple Developer ID certificate.
+- **Provisioning Profiles**:
+    - For the System Extension: Requires a specific provisioning profile that enables the Network Extension capability.
+    - For the main application: Requires a provisioning profile that allows System Extension installation and potentially App Group access.
+- **Notarization**: For distribution outside the Mac App Store, the main application bundle (containing the extension and XPC service) must be notarized by Apple. This involves uploading the signed app to Apple's notarization service.
+
+Failure to meet these signing and provisioning requirements will prevent the System Extension from being installed or run.
 
 ## System Dependencies and Permissions
 
@@ -122,70 +178,6 @@ To obtain more detailed process information, such as the full executable path an
 
 This phased approach allows for incremental improvements in process attribution accuracy and firewalling granularity.
 
-## Current Implementation Details
-
-The `PortmasterTunnelProvider.swift` file now contains:
-- A class `PortmasterTunnelProvider` inheriting from `NEPacketTunnelProvider`.
-- Implementation of `startTunnel`, `stopTunnel`, `handleAppMessage`, `sleep`, and `wake` methods with basic logging.
-- In `startTunnel`, it sets up basic `NEPacketTunnelNetworkSettings` to route all IPv4 traffic through the tunnel for interception.
-- A `readPackets` method is implemented to read IP packets from the `packetFlow`.
-- For each packet, it attempts to get the `sourceAppUniqueIdentifier` and logs this information along with a hex representation of the packet data.
-- Basic error handling and logging are included in the lifecycle methods.
-
-The `PortmasterTunnelProvider.entitlements` file has been updated to include `packet-tunnel` and `com.apple.developer.system-extension.install` entitlements.
-
-## Swift-Go Bridge
-
-A basic communication bridge has been implemented to allow the Swift-based `PortmasterTunnelProvider` to send messages to the Go core. This is achieved using CGo, allowing Swift to call C functions that are implemented in Go.
-
-### Mechanism: CGo Direct Call
-
-1.  **C Header (`macos-bridge.h`):**
-    *   A C function prototype, `void send_data_to_go(const char* message);`, is defined. This function is intended to be called by Swift.
-
-2.  **Swift Side (`PortmasterTunnelProvider.swift`):**
-    *   The Swift code calls the `send_data_to_go` C function directly.
-    *   Example calls have been added in `startTunnel` (to send a "Tunnel started" message) and within the `readPackets` loop (to send information about intercepted packets).
-    *   For this to work, `macos-bridge.h` must be made available to the Swift compiler, typically by importing it into the target's bridging header (e.g., `YourProject-Bridging-Header.h`).
-
-3.  **Go Side (`native_bridge_darwin.go`):**
-    *   This new Go file (compiled only for Darwin) uses CGo to implement the `send_data_to_go` function.
-    *   The `//export send_data_to_go` directive makes the Go function available as a C function.
-    *   The received C string is converted to a Go string, and currently, it's logged using the Portmaster logger (`log.Infof`).
-    *   A placeholder `get_data_from_go` function and a `dummy` function (to ensure C.CString linkage) are also included for illustrative purposes.
-
-### Files Involved:
-
--   `service/firewall/interception/macos/macos-bridge.h`: Defines the C interface for the bridge.
--   `service/firewall/interception/macos/PortmasterTunnelProvider.swift`: Calls the C bridge function from Swift.
--   `service/firewall/interception/macos/native_bridge_darwin.go`: Implements the C bridge function in Go using CGo.
-
-### Build System Adjustments for the Bridge (`Earthfile`):
-
-The `kext-build-macos` target in the `Earthfile` has been updated with conceptual steps to support the CGo bridge:
--   It now includes a stage (using `FROM +go-base AS go-bridge-builder`) to compile the Go code in `service/firewall/interception/macos/` specifically for the target macOS architecture (e.g., `darwin/amd64`, `darwin/arm64`).
--   The conceptual Go build command is `go build -buildmode=c-archive -o macos_bridge.a .`. This would produce a static library (`.a` file) and the C header.
--   Dummy files (`macos_bridge_${target}.a`) are currently created to represent this Go library output.
--   The `Earthfile` now saves these dummy `.a` files as artifacts alongside the placeholder `.appex` bundle.
--   **Challenge**: The actual linking of this Go static library (`macos_bridge.a`) into the Swift System Extension (`.appex`) is a complex step that typically happens within the Xcode build system (`xcodebuild`). Orchestrating this perfectly via Earthly requires a pre-existing Xcode project configured to find and link this library and its header. The current `Earthfile` simulates the preparation of these artifacts.
-
-### Challenges and Next Steps:
-
--   **Direct Linking Complexity**: Linking a Go CGo static library into a Swift System Extension, ensuring the Go runtime initializes correctly within the extension's sandboxed environment, and managing dependencies can be challenging. This method requires careful setup of the Xcode project that builds the `.appex`.
--   **Data Marshalling**: The current bridge only sends simple UTF-8 strings. For more complex data (like packet data or structured information), robust marshalling/unmarshalling mechanisms would be needed. This can be error-prone and performance-intensive if not handled carefully with CGo.
--   **Bidirectional Communication**: The current implementation focuses on Swift-to-Go. A robust bridge would also need efficient Go-to-Swift communication.
--   **Alternative IPC - XPC**: Given the complexities of direct linking and the sandboxed nature of System Extensions, a more robust and flexible long-term solution for communication between the Swift extension and the Go core would be to use XPC (Cross-Process Communication).
-    *   The Network Extension could act as an XPC client.
-    *   The Portmaster Go core (or a dedicated Go XPC service) would act as the XPC server.
-    *   This approach decouples the extension from the Go core, simplifies build processes, and is the standard Apple-recommended way for extensions to communicate with their containing apps or related processes.
-    *   XPC provides a well-defined structure for exchanging messages and data.
--   **High-Volume Data**: For frequent, high-volume data like individual network packets, CGo calls or even XPC messages for every packet would be too slow. A more efficient mechanism, such as shared memory (if permissible and carefully managed) or batching data, would be necessary for performance. The current `send_data_to_go` call in `readPackets` is illustrative and not suitable for production packet forwarding.
-
-The next steps should involve:
-1.  Thoroughly investigating and attempting the actual linking of the `macos_bridge.a` into an Xcode project for the System Extension.
-2.  If direct linking proves too problematic or unstable, pivot to designing and implementing an XPC-based bridge.
-3.  Developing strategies for efficient transfer of packet data and other high-volume information.
-
 ## XPC Communication
 
 To facilitate robust communication between the Swift-based `PortmasterTunnelProvider` (System Extension) and a user-space helper process (which will eventually communicate with the Go core), an XPC-based approach has been designed. This replaces the direct CGo bridge for primary communication, offering better stability, decoupling, and adherence to Apple's recommended practices for inter-process communication with System Extensions.
@@ -218,31 +210,47 @@ The Swift System Extension acts as the XPC client:
     -   Error handling for the proxy call is included.
 -   **Integration**:
     -   In `readPackets()`, when a packet is processed, its metadata (bundle ID, source/destination IPs - currently simplified parsing) is extracted and sent via `sendFlowToXPC`.
-    -   Previous CGo calls (`send_data_to_go`) have been commented out in favor of XPC.
+    -   Previous CGo calls (`send_data_to_go`) have been removed in favor of XPC.
 
-### 3. XPC Server (Objective-C Bridge to Go)
+### 3. XPC Server (Objective-C XPC Service)
 
-Due to the complexity and potential lack of mature, readily available libraries for hosting a direct Go XPC service that can be seamlessly managed by `launchd` as an app-bundled XPC service, the strategy is to use an Objective-C XPC service as an intermediary. This Objective-C service will handle XPC communication from the Swift extension and will be responsible for forwarding the data to the main Portmaster Go process (likely via a Unix domain socket or other local IPC, to be implemented in a future task).
+The Objective-C XPC Service (source located in `service/firewall/interception/macos/xpcservice/macos-xpc-service/`) acts as a bridge:
+- It implements the `PortmasterXPCServicable` protocol, which includes methods for passing flow information along with an `auditToken` (as `NSData`).
+- It receives flow data from the Network Extension.
+- **Process Attribution in XPC Service**:
+    - It uses the received `auditToken` (if valid and of correct length) to derive the Process ID (PID) of the source application using the `audit_token_to_pid` function.
+    - If a valid PID is obtained, it then calls `proc_pidpath` to retrieve the full executable path of the process.
+    - If the originally passed `bundleID` was "N/A" or empty, it attempts to derive a BundleID from the `executablePath` using `[NSBundle bundleWithPath:executablePath].bundleIdentifier`.
+    - The PID and `executablePath` (and potentially updated `bundleID`) are logged.
+    - Code signature retrieval (e.g., Team ID using `SecCodeCopySigningInformation`) is a planned next step but is currently not fully implemented in this phase (code might be present but commented or placeholder).
+- It serializes the augmented flow data (now including PID and executable path) to JSON and forwards it to the Go IPC server via a Unix Domain Socket.
+    - **Note**: The Go IPC server (`ipc_server_darwin.go`) currently only deserializes the original flow fields (BundleID, IPs, ports, protocol). The handling of `pid` and `executablePath` in the Go layer is a TODO for the next phase.
+- The build process for this service is initiated by the `build_xpc_service.sh` script (located in `service/firewall/interception/macos/xpcservice/`), which is called by the `Earthfile`.
 
--   **Directory**: `macos-xpc-service/` (contains the Objective-C XPC service code)
--   **Files**:
-    -   `PortmasterXPCService.h`: Defines the Objective-C class `PortmasterXPCService` that conforms to the `PortmasterXPCServicable` protocol (Swift protocol exposed to Objective-C).
-    -   `PortmasterXPCService.m`: Implements the `PortmasterXPCService` class.
-        -   The `processNewFlowWithBundleID:sourceIP:destinationIP:completionHandler:` method currently logs the received flow information.
-        -   **TODO**: This implementation will need to be extended to communicate with the Go core.
-    -   `main.m`: Contains the main entry point for the XPC service. It sets up an `NSXPCListener` and a delegate to accept and configure new connections.
-    -   `Info.plist`: Configures the XPC service, including its identifier (`com.safing.portmaster.xpcservice`) and service type (`Application`).
+### 4. Build System and Developer Workflow (`Earthfile`, `build_*.sh`, Xcode)
 
-This Objective-C XPC service acts as a stable bridge, leveraging standard macOS mechanisms.
+The build process for macOS components is managed by a combination of `Earthfile` and placeholder shell scripts, with the expectation that actual compilation and signing will occur within an Xcode environment.
 
-### 4. Build System Adjustments (`Earthfile`)
+-   **`Earthfile` Targets**:
+    -   **`kext-build-macos`**: This target is responsible for the Network Extension. It copies the Swift source files (`PortmasterTunnelProvider.swift`, `PortmasterTunnelProvider.entitlements`, `PortmasterXPCServicable.swift`), the `build_extension.sh` script (from `service/firewall/interception/macos/`), and the `macos-app-placeholder/Info.plist` (as context for a containing app) into a staging directory. It then makes `build_extension.sh` executable and runs it.
+    -   **`xpc-service-macos`**: This target handles the XPC Service. It copies the Objective-C source files (from `service/firewall/interception/macos/xpcservice/macos-xpc-service/`), the `build_xpc_service.sh` script (from `service/firewall/interception/macos/xpcservice/`), the `PortmasterXPCServicable.swift` protocol (for context), and the `macos-app-placeholder/Info.plist` into a staging directory. It then makes `build_xpc_service.sh` executable and runs it.
+    -   The main `build` target in `Earthfile` calls these targets, integrating them into the broader project build.
 
--   **XPC Service Target (`xpc-service-macos`)**:
-    -   A new target `xpc-service-macos` has been added to the `Earthfile`.
-    -   This target currently copies the Objective-C XPC service source files (`macos-xpc-service/`) into a conceptual `.xpc` bundle structure (`${outputDir}/macos_all/PortmasterXPC.xpc`).
-    -   It does not compile the Objective-C code; this would be handled by an Xcode build process that builds the main application containing the System Extension and the XPC service. Earthly prepares/stages the source files.
--   **Main Build Integration**:
-    -   The main `build` target in `Earthfile` has been updated to include a call to `+xpc-service-macos` to ensure these XPC service files are "packaged".
+-   **Placeholder Build Scripts (`build_extension.sh`, `build_xpc_service.sh`)**:
+    -   These scripts currently *simulate* a successful build by creating token files (e.g., `PortmasterTunnelProvider.appex_built_SUCCESS`) and empty placeholder bundle files (`.appex` and `.xpc`).
+    -   **For actual compilation and packaging, these scripts must be updated with the necessary `xcodebuild` commands.** Example `xcodebuild` invocations are commented within the scripts as a starting point.
+
+-   **Developer Workflow**:
+    -   **Automated Placeholder Build (Earthly)**: The current Earthly setup allows for an automated "build" (via the scripts) of these components as part of the larger project build. This is useful for CI and for ensuring the file staging process works. Earthly creates placeholder `.appex` and `.xpc` files.
+    -   **Xcode for Development & Real Builds**: Developers working on the Swift Network Extension or Objective-C XPC Service will primarily use Xcode:
+        1.  A dedicated Xcode project (not yet included in this repository) needs to be set up. This project would contain targets for:
+            *   A main macOS application (which could be the Portmaster UI application or a minimal wrapper).
+            *   The `PortmasterTunnelProvider` System Extension, using sources from `service/firewall/interception/macos/`.
+            *   The `PortmasterXPCService` XPC Service, using sources from `service/firewall/interception/macos/xpcservice/macos-xpc-service/`.
+        2.  The Xcode project must be configured for correct code signing (with an Apple Developer ID), provisioning profiles, and App Group entitlements.
+        3.  The placeholder build scripts (`build_extension.sh`, `build_xpc_service.sh`) can serve as templates for the command-line invocations (`xcodebuild` commands) that would be used in a CI environment that has access to Xcode build tools and appropriate signing identities.
+
+-   **Go IPC Server**: The `ipc_server_darwin.go` is compiled as part of the standard Go build for macOS (`darwin` target) via the `+go-build` target in the `Earthfile`.
 
 ### 5. Data Structures
 
@@ -260,17 +268,29 @@ To get data from the Objective-C XPC Service (which receives data from the Swift
 -   **Data Serialization**: JSON. Flow data is serialized into a JSON object.
     ```json
     {
-      "bundleID": "com.example.app",
+      "bundleID": "com.example.app", // May be updated if derived from executablePath
       "sourceIP": "192.168.1.10",
-      "destinationIP": "8.8.8.8"
+      "destinationIP": "8.8.8.8",
+      "sourcePort": 12345,
+      "destinationPort": 80,
+      "protocol": 6, // (IPPROTO_TCP)
+      "pid": 123, // Derived from auditToken, -1 on error
+      "executablePath": "/Applications/Safari.app/Contents/MacOS/Safari" // "N/A" or "Path Lookup Failed" on error
+      // "codeSignatureDetails": "TeamID: ABCDE12345" // Future addition
     }
     ```
+    *(The Go IPC server currently only deserializes the original fields and the newly added port/protocol fields; handling of `pid` and `executablePath` is pending in Go).*
 
-#### Objective-C XPC Service (`PortmasterXPCService.m` - Client Side of IPC)
+#### Objective-C XPC Service (`service/firewall/interception/macos/xpcservice/macos-xpc-service/PortmasterXPCService.m` - Client Side of IPC)
 
--   **File**: `macos-xpc-service/PortmasterXPCService.m`
 -   **Modifications**:
-    -   When `processNewFlowWithBundleID...` is called, the received flow data (bundleID, sourceIP, destinationIP) is serialized into a JSON object.
+    -   The `processNewFlowWithBundleID...` method now accepts `sourcePort`, `destinationPort`, `protocol`, and `auditToken` (as `NSData *`) as parameters.
+    -   It uses the received `auditToken` to derive the Process ID (PID) using `audit_token_to_pid`.
+    -   If a PID is successfully obtained:
+        - It retrieves the full executable path using `proc_pidpath`.
+        - If the initial `bundleID` was generic (e.g., "N/A"), it attempts to derive a more specific BundleID from the executable path.
+    -   The PID and `executablePath` (along with the potentially updated `bundleID`) are included in the `NSDictionary` (`flowDataDict`) that is serialized to JSON. Code signature retrieval is deferred.
+    -   Extensive logging is included to trace these operations.
     -   The service attempts to connect to the Unix Domain Socket at `/tmp/portmaster_ipc.sock`.
     -   The serialized JSON data (UTF-8 encoded, newline-terminated) is sent over the socket to the Go IPC server.
     -   Includes error handling for JSON serialization, socket creation, connection, and writing.
@@ -289,21 +309,30 @@ To get data from the Objective-C XPC Service (which receives data from the Swift
     -   `StopIPCServer()`: Closes the stop channel, causing the listener goroutine to shut down and close the socket.
     -   `handleIPCConnection(conn net.Conn)`:
         *   Reads newline-terminated data from the connection.
-        *   Deserializes the received JSON data into a `FlowData` struct.
-        *   Logs the received `FlowData` using `log.Infof`.
-        *   **TODO**: This is where further processing by the Portmaster core (e.g., sending to firewall logic) will be integrated.
+        *   Deserializes the received JSON data into a `FlowData` struct. (Currently, this struct in Go only contains `bundleID`, `sourceIP`, `destinationIP`, `sourcePort`, `destinationPort`, `protocol`. It will need updating in the next phase to include PID, path, and signature details).
+        *   Logs the received (partially deserialized) `FlowData` using `log.Infof`.
+        *   **TODO (Next Phase)**: Update the Go `FlowData` struct in `ipc_server_darwin.go` to include `PID` (int), `ExecutablePath` (string), and `CodeSignatureDetails` (string). Modify `handleIPCConnection` to deserialize these new fields from the JSON. Adapt `processMacOSFlowData` to use this new information when creating or updating `process.Process` objects within the `network.Connection`.
 -   **Integration**: The `StartIPCServer()` and `StopIPCServer()` functions are intended to be called from the main Portmaster application logic during startup and shutdown on macOS.
 
 ### Next Steps for XPC & IPC Communication:
 
-1.  **Go Core Integration**: Integrate the `StartIPCServer()` call into the Portmaster startup sequence on macOS. Ensure `StopIPCServer()` is called on shutdown. The received `FlowData` in `handleIPCConnection` needs to be passed to the relevant Portmaster modules for actual processing.
-2.  **Full Xcode Project Integration**: The System Extension and the Objective-C XPC service need to be correctly configured and built within an Xcode project. This includes:
+1.  **Go IPC and Core Logic Update (Next Subtask)**:
+    *   The primary focus of the next subtask will be to update the Go side:
+        *   Modify the `FlowData` struct in `ipc_server_darwin.go` to include `PID` (int), `ExecutablePath` (string), and `CodeSignatureDetails` (string).
+        *   Update `handleIPCConnection` in `ipc_server_darwin.go` to correctly deserialize these new fields from the JSON payload received from the XPC service.
+        *   Enhance `processMacOSFlowData` in `ipc_server_darwin.go` to utilize the new `PID`, `ExecutablePath`, and `CodeSignatureDetails` when creating or updating `process.Process` objects. This will involve using the PID for more accurate process lookups and populating the path and signature details into the `process.Process` struct, allowing for more granular firewall rules.
+2.  **Go Core Integration**: Integrate the `StartIPCServer()` call into the Portmaster startup sequence on macOS. Ensure `StopIPCServer()` is called on shutdown. The (now more complete) `FlowData` in `handleIPCConnection` needs to be passed to the relevant Portmaster modules for actual processing.
+3.  **Full Xcode Project Integration**: The System Extension and the Objective-C XPC service need to be correctly configured and built within an Xcode project. This includes:
     *   Ensuring the Swift System Extension target can connect to the XPC service.
     *   Ensuring the XPC service is correctly bundled within the main application and can create the Unix Domain Socket with appropriate permissions.
-    *   Proper code signing and entitlements for the extension, XPC service, and main application (potentially including App Group entitlements for a shared socket path).
-3.  **Refine Data Structures & IPC**: As more complex data needs to be exchanged, the XPC protocol, JSON structures, and IPC handling (e.g., more robust framing than newline, error reporting from Go to XPC service) will need to be updated.
-4.  **Error Handling and Resilience**: Enhance error handling and connection management for both the XPC link and the Unix Domain Socket IPC. Consider scenarios like the Go IPC server not being available.
-5.  **Security**: Review and secure the Unix Domain Socket path and permissions.
+    *   Proper code signing and entitlements for the extension, XPC service, and main application (potentially including App Group entitlements for a shared socket path - see Entitlements section).
+4.  **Error Handling and Resilience**:
+    *   **TODO**: Implement comprehensive error handling (e.g., XPC connection retry logic, handling IPC server unavailability, error propagation from Go back to XPC).
+5.  **Security**:
+    *   **TODO**: Change the Unix Domain Socket path from `/tmp/portmaster_ipc.sock` to a secure, app-specific path, ideally within an App Group container.
+    *   **Future Enhancement**: Consider authentication mechanisms on the Unix Domain Socket.
+6.  **Data Serialization Robustness**:
+    *   **Future Enhancement**: Consider more robust data serialization (e.g., Protocol Buffers) and IPC framing (e.g., length-prefixing messages) if JSON/newline becomes a bottleneck or too error-prone.
 
 ## Firewall Logic Integration
 
@@ -472,17 +501,5 @@ A comprehensive testing strategy is crucial for ensuring the reliability and cor
 
 Initial stubs for building the macOS Network Extension have been added to the project's `Earthfile`. The following targets were added:
 
-- `kext-build-macos`: This target is responsible for building the `PortmasterTunnelProvider.appex` for a specified target architecture (e.g., `x86_64-apple-darwin`, `aarch64-apple-darwin`). It currently contains placeholder commands and needs to be implemented with the actual build steps for the Swift-based network extension.
-- The main `build` target has been updated to include calls to `kext-build-macos` for both `x86_64-apple-darwin` and `aarch64-apple-darwin` architectures.
-- Go build targets (`go-build`, `go-ci`) have been updated to include macOS targets (`darwin/amd64` and `darwin/arm64`).
-
-The `RUST_TO_GO_ARCH_STRING` helper function in the `Earthfile` was already capable of handling Darwin targets, so no changes were needed there.
-
-**Next Steps for Build System Integration:**
-
-- Implement the actual build commands within the `kext-build-macos` target in the `Earthfile`. This will involve:
-    - Setting up the correct build environment for Swift and Xcode.
-    - Compiling the Swift code in `PortmasterTunnelProvider.swift`.
-    - Packaging the compiled extension along with its entitlements (`PortmasterTunnelProvider.entitlements`) into an `.appex` bundle.
-    - Ensuring the resulting `.appex` is placed in the correct output directory (e.g., `dist/darwin_amd64/` or `dist/darwin_arm64/`).
-- Verify that the CGo integration (using `macos-bridge.h`) works correctly within the Earthly build environment if direct Go interaction is required for the extension.
+The "Build System" section has been integrated into the "Build System and Developer Workflow" section above, providing a more cohesive explanation.
+The CGo bridge components (`macos-bridge.h`, `native_bridge_darwin.go`) are obsolete and all references to them have been removed from this document.

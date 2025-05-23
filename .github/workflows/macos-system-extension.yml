@@ -1,0 +1,48 @@
+name: macOS System Extension & XPC Service
+
+on:
+  push:
+    paths:
+      - 'service/firewall/interception/macos/**'
+      - 'macos-app-placeholder/**' # If changes here affect NE/XPC bundling
+      - 'Earthfile' # If Earthfile changes affect these targets
+    branches:
+      - master
+      - develop
+  pull_request:
+    paths:
+      - 'service/firewall/interception/macos/**'
+      - 'macos-app-placeholder/**'
+      - 'Earthfile'
+    branches:
+      - master
+      - develop
+
+jobs:
+  build_macos_native:
+    name: Build macOS Network Extension and XPC Service
+    runs-on: macos-latest # Or a specific version like macos-13 if needed
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Earthly
+      uses: earthly/actions-setup@v1
+      with:
+        version: v0.8.0 # Use a specific version used in other workflows
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3 # Use latest major version
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run macOS Native Builds via Earthly
+      # These Earthly targets should execute the placeholder scripts
+      # (build_extension.sh, build_xpc_service.sh)
+      # Assumes Earthfile targets are +kext-build-macos and +xpc-service-macos
+      run: |
+        earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +kext-build-macos
+        earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +xpc-service-macos

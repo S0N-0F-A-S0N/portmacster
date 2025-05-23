@@ -144,17 +144,30 @@ class PortmasterTunnelProvider: NEPacketTunnelProvider {
                 let sourceIPRaw = packetData.subdata(in: 12..<16)
                 let destIPRaw = packetData.subdata(in: 16..<20)
 
-                let sourceIP = sourceIPRaw.map { String($0) }.joined(separator: ".")
-                let destIP = destIPRaw.map { String($0) }.joined(separator: ".")
-                
+                // Parse the packet
+                let (sourceIP, destinationIP, protocolType, sourcePort, destinationPort) = self.parseIPPacket(packetData)
+
                 let metadata = self.packetFlow.metadata(for: packetData)
                 let bundleID = metadata?.sourceAppUniqueIdentifier ?? "N/A"
                 
-                os_log(.default, log: self.defaultLog, "PortmasterTunnelProvider: Intercepted IP packet. App: %{public}@, Src: %{public}@, Dst: %{public}@", bundleID, sourceIP, destIP)
+                os_log(.default, log: self.defaultLog, """
+                    PortmasterTunnelProvider: Intercepted IP packet. App: %{public}@, \
+                    Src: %{public}@:%d, Dst: %{public}@:%d, Proto: %d
+                    """, bundleID, sourceIP ?? "N/A", sourcePort ?? 0, destinationIP ?? "N/A", destinationPort ?? 0, protocolType ?? 0)
 
-                // Send flow information via XPC
-                self.sendFlowToXPC(bundleID: bundleID, sourceIP: sourceIP, destinationIP: destIP)
-
+                // Send flow information via XPC, including new fields
+                // The XPC interface will be updated in a subsequent step.
+                if let srcIP = sourceIP, let dstIP = destinationIP, let proto = protocolType {
+                    self.sendFlowToXPC(bundleID: bundleID, 
+                                       sourceIP: srcIP, 
+                                       destinationIP: dstIP,
+                                       sourcePort: sourcePort ?? 0, // Default to 0 if not available (e.g. ICMP)
+                                       destinationPort: destinationPort ?? 0, // Default to 0 if not available
+                                       protocol: proto)
+                } else {
+                    os_log(.error, log: self.defaultLog, "PortmasterTunnelProvider: Could not parse full IP packet details for XPC.")
+                }
+                
                 // Remove CGo call for now, prefer XPC
                 // let packetInfoMessage = "Packet intercepted. App: \(bundleID)"
                 // if let cPacketInfoMessage = packetInfoMessage.cString(using: .utf8) {
@@ -165,6 +178,99 @@ class PortmasterTunnelProvider: NEPacketTunnelProvider {
             self.readPackets()
         }
     }
+
+    
+    // Helper structures for parsing
+    struct IPv4Header {
+        var versionAndIHL: UInt8
+        var differentiatedServices: UInt8
+        var totalLength: UInt16
+        var identification: UInt16
+        var flagsAndFragmentOffset: UInt16
+        var timeToLive: UInt8
+        var `protocol`: UInt8
+        var headerChecksum: UInt16
+        var sourceIP: UInt32
+        var destinationIP: UInt32
+        // Options and padding can follow
+    }
+
+    struct TCPHeader {
+        var sourcePort: UInt16
+        var destinationPort: UInt16
+        var sequenceNumber: UInt32
+        var acknowledgmentNumber: UInt32
+        var dataOffsetAndFlags: UInt16 // First 4 bits are data offset, next 3 reserved, next 9 are flags
+        var windowSize: UInt16
+        var checksum: UInt16
+        var urgentPointer: UInt16
+        // Options and padding can follow
+    }
+
+    struct UDPHeader {
+        var sourcePort: UInt16
+        var destinationPort: UInt16
+        var length: UInt16
+        var checksum: UInt16
+    }
+
+    private func parseIPPacket(_ data: Data) -> (sourceIP: String?, destinationIP: String?, protocol: Int?, sourcePort: Int?, destinationPort: Int?) {
+        guard data.count >= 20 else { // Minimum IPv4 header size
+            os_log(.error, log: defaultLog, "PortmasterTunnelProvider: Packet too short for IPv4 header.")
+            return (nil, nil, nil, nil, nil)
+        }
+
+        // Assuming IPv4 for now
+        let ipHeader = data.withUnsafeBytes { $0.load(as: IPv4Header.self) }
+        
+        let sourceIPString = ipv4AddressToString(ipHeader.sourceIP)
+        let destinationIPString = ipv4AddressToString(ipHeader.destinationIP)
+        let protocolType = Int(ipHeader.protocol)
+        
+        var sourcePort: Int? = nil
+        var destinationPort: Int? = nil
+
+        let ipHeaderLength = Int((ipHeader.versionAndIHL & 0x0F) * 4) // IHL is in 4-byte words
+
+        guard data.count >= ipHeaderLength else {
+            os_log(.error, log: defaultLog, "PortmasterTunnelProvider: Packet too short for full IP header (IHL: %d).", ipHeaderLength)
+            return (sourceIPString, destinationIPString, protocolType, nil, nil)
+        }
+
+        if protocolType == IPPROTO_TCP { // 6 for TCP
+            guard data.count >= ipHeaderLength + 20 else { // Minimum TCP header size
+                os_log(.error, log: defaultLog, "PortmasterTunnelProvider: TCP packet too short for header.")
+                return (sourceIPString, destinationIPString, protocolType, nil, nil)
+            }
+            let tcpHeader = data.subdata(in: ipHeaderLength..<(ipHeaderLength + 20)).withUnsafeBytes { $0.load(as: TCPHeader.self) }
+            sourcePort = Int(CFSwapInt16BigToHost(tcpHeader.sourcePort))
+            destinationPort = Int(CFSwapInt16BigToHost(tcpHeader.destinationPort))
+        } else if protocolType == IPPROTO_UDP { // 17 for UDP
+            guard data.count >= ipHeaderLength + 8 else { // UDP header size
+                os_log(.error, log: defaultLog, "PortmasterTunnelProvider: UDP packet too short for header.")
+                return (sourceIPString, destinationIPString, protocolType, nil, nil)
+            }
+            let udpHeader = data.subdata(in: ipHeaderLength..<(ipHeaderLength + 8)).withUnsafeBytes { $0.load(as: UDPHeader.self) }
+            sourcePort = Int(CFSwapInt16BigToHost(udpHeader.sourcePort))
+            destinationPort = Int(CFSwapInt16BigToHost(udpHeader.destinationPort))
+        }
+        // ICMP (protocol 1) and other protocols will have nil for ports
+        
+        return (sourceIPString, destinationIPString, protocolType, sourcePort, destinationPort)
+    }
+
+    private func ipv4AddressToString(_ address: UInt32) -> String {
+        // address is in network byte order (big endian), convert to host byte order for manipulation if needed,
+        // but for direct byte access, it's fine.
+        // However, inet_ntoa expects network byte order.
+        var networkOrderAddress = address // Already in network byte order from header
+        var addr = in_addr(s_addr: networkOrderAddress)
+        if let cString = inet_ntoa(&addr) {
+            return String(cString: cString)
+        }
+        return "?.?.?.?" // Fallback
+    }
+
 
     // Ensure XPC connection is set up when tunnel starts
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
