@@ -27,7 +27,7 @@ ARG --global outputDir = "./dist"
 # x86_64-pc-windows-gnu
 # aarch64-pc-windows-gnu
 #
-# Mac:
+# macOS:
 # x86_64-apple-darwin
 # aarch64-apple-darwin
 
@@ -49,6 +49,8 @@ build:
     BUILD +go-build --GOOS="linux"   --GOARCH="arm64"
     BUILD +go-build --GOOS="windows" --GOARCH="amd64"
     BUILD +go-build --GOOS="windows" --GOARCH="arm64"
+    BUILD +go-build --GOOS="darwin"  --GOARCH="amd64"
+    BUILD +go-build --GOOS="darwin"  --GOARCH="arm64"
 
     # Build the Angular UI:
     # ./dist/all/portmaster-ui.zip
@@ -70,6 +72,12 @@ build:
     # ./dist/all/assets.zip
     BUILD +assets
 
+    # Build macOS Network Extension
+    # ./dist/darwin_amd64/PortmasterTunnelProvider.appex
+    # ./dist/darwin_arm64/PortmasterTunnelProvider.appex
+    BUILD +kext-build-macos --target="x86_64-apple-darwin"
+    BUILD +kext-build-macos --target="aarch64-apple-darwin"
+
 build-spn:
     BUILD +go-build --CMDS="hub" --GOOS="linux"   --GOARCH="amd64"
     BUILD +go-build --CMDS="hub" --GOOS="linux"   --GOARCH="arm64"
@@ -80,6 +88,8 @@ go-ci:
     BUILD +go-build --GOOS="linux"   --GOARCH="arm64"
     BUILD +go-build --GOOS="windows" --GOARCH="amd64"
     BUILD +go-build --GOOS="windows" --GOARCH="arm64"
+    BUILD +go-build --GOOS="darwin"  --GOARCH="amd64"
+    BUILD +go-build --GOOS="darwin"  --GOARCH="arm64"
     BUILD +go-test
 
 angular-ci:
@@ -661,6 +671,83 @@ kext-build:
     DO rust+CARGO --args="run"
 
     SAVE ARTIFACT --keep-ts "portmaster-kext-release-bundle.zip" AS LOCAL "${outputDir}/windows_amd64/portmaster-kext-release-bundle.zip"
+
+# Build the macOS Network Extension. This is a placeholder and needs to be implemented.
+kext-build-macos:
+    FROM ${rust_builder_image} # Using rust_builder_image as a placeholder
+
+    ARG --required target
+
+    # Placeholder for actual macOS build commands
+    RUN echo "Building macOS Network Extension for target ${target}..."
+    # This target will need to be significantly more complex, involving:
+    # 1. Compiling the Swift code (likely using xcodebuild).
+    # 2. Compiling the Go CGo code into a static library.
+    # 3. Linking the Go static library into the Swift extension.
+    # 4. Packaging the .appex bundle.
+
+    # Step 2: Compile Go CGo bridge code (illustrative)
+    # The GOOS and GOARCH should align with the macOS target.
+    # For example, if target is 'aarch64-apple-darwin', GOOS='darwin', GOARCH='arm64'.
+    # This requires RUST_TO_GO_ARCH_STRING to correctly parse darwin targets.
+    DO +RUST_TO_GO_ARCH_STRING --rustTarget="${target}"
+    RUN echo "Building Go bridge for ${GOOS}/${GOARCH}"
+    # The output of this would typically be a .a file (e.g., macos_bridge.a)
+    # This command is a simplified representation. CGO_ENABLED=1 is crucial.
+    # The actual build command would need to specify the output type as a C archive.
+    # FROM +go-base is used to get the Go environment.
+    FROM +go-base AS go-bridge-builder
+    ARG target # Propagate target to this stage
+    WORKDIR /app/service/firewall/interception/macos
+    # This is a conceptual step. A real CGo build for a static library would be like:
+    # RUN go build -buildmode=c-archive -o macos_bridge.a .
+    # For now, we'll just create a dummy file to represent the library.
+    RUN echo "Go bridge compiled for ${target}" > "macos_bridge_${target}.a"
+    RUN mkdir -p "/build_output/macos_bridge/${target}/lib"
+    RUN cp "macos_bridge_${target}.a" "/build_output/macos_bridge/${target}/lib/"
+    RUN cp "macos-bridge.h" "/build_output/macos_bridge/${target}/include/"
+
+
+    # In a real scenario, the Swift compilation (xcodebuild) would then be configured
+    # to link against macos_bridge.a and include macos-bridge.h.
+    # This is complex to orchestrate solely within Earthly without an existing Xcode project setup.
+
+    RUN echo "Simulating Swift extension build and packaging for ${target}..."
+    RUN mkdir -p "${outputDir}/${GO_ARCH_STRING}"
+    # Create a dummy .appex file
+    RUN echo "Placeholder macOS Extension for ${target}" > "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex"
+    # Copy the dummy Go library artifact as well, to show it's part of the output
+    RUN cp "/build_output/macos_bridge/${target}/lib/macos_bridge_${target}.a" "${outputDir}/${GO_ARCH_STRING}/"
+
+    SAVE ARTIFACT --keep-ts "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex" AS LOCAL "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex"
+    SAVE ARTIFACT --keep-ts "${outputDir}/${GO_ARCH_STRING}/macos_bridge_${target}.a" AS LOCAL "${outputDir}/${GO_ARCH_STRING}/macos_bridge.a"
+
+# Build the macOS XPC Service (Objective-C).
+# This target simulates the packaging of the XPC service. Actual compilation
+# would occur in an Xcode environment.
+xpc-service-macos:
+    FROM alpine # Using a minimal image as we are just copying files
+    ARG target="all_macos" # Could be x86_64-apple-darwin or aarch64-apple-darwin if specific resources were needed
+
+    WORKDIR /app
+
+    # Copy the Objective-C XPC service source files
+    COPY macos-xpc-service ./macos-xpc-service
+
+    # Create a placeholder .xpc bundle structure (conceptual)
+    # In a real build, xcodebuild would create this.
+    RUN mkdir -p "${outputDir}/${target}/PortmasterXPC.xpc/Contents"
+    RUN cp ./macos-xpc-service/Info.plist "${outputDir}/${target}/PortmasterXPC.xpc/Contents/Info.plist"
+    # Simulate copying compiled binary (though we don't compile it here)
+    RUN echo "Placeholder XPC Service Binary" > "${outputDir}/${target}/PortmasterXPC.xpc/Contents/MacOS_PortmasterXPC"
+    # Copy source files into a subdirectory for reference, as they aren't compiled by this Earthly target.
+    RUN cp -r ./macos-xpc-service "${outputDir}/${target}/PortmasterXPC.xpc/Contents/Resources/sources"
+
+
+    # Save the placeholder .xpc bundle as an artifact.
+    # The GO_ARCH_STRING might not be directly applicable if it's a universal binary,
+    # but we'll use a generic name for now.
+    SAVE ARTIFACT --keep-ts "${outputDir}/${target}/PortmasterXPC.xpc" AS LOCAL "${outputDir}/macos_all/PortmasterXPC.xpc"
 
 
 # Takes GOOS, GOARCH and optionally GOARM and creates a string representation for file-names.

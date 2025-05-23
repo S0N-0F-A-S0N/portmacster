@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>packet-tunnel</string>
+    </array>
+    <key>com.apple.developer.system-extension.install</key>
+    <true/>
+    <!-- 
+        Notes on other potential entitlements:
+        - If the main application (not the extension) needs to communicate with the extension
+          in more advanced ways or access specific system resources for process attribution
+          (beyond what `sourceAppUniqueIdentifier` provides), it might require its own
+          set of entitlements, potentially including sandbox exceptions or privileged helper
+          tool communication entitlements.
+        - `com.apple.security.app-sandbox`: While system extensions run in a sandbox,
+          this entitlement is typically for the containing app. The extension's capabilities
+          are primarily defined by its NetworkExtension type.
+        - Accessing detailed process information like executable paths or signing info from
+          within the extension itself is restricted. This is usually done by the main app
+          or a helper tool with appropriate permissions, which then communicates relevant
+          data to the extension if needed.
+    -->
+</dict>
+</plist>
