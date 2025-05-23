@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.safing.portmaster.xpcservice</string> <!-- Matches serviceName in Swift -->
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>XPCService</key>
+	<dict>
+		<key>ServiceType</key>
+		<string>Application</string> <!-- Or System if it's a global helper -->
+		<key>_ উপায়</key> <!-- Using a non-ASCII key as a comment, as real comments are not allowed in Info.plist XML -->
+		<!-- "_ উপায়" means "Strategy" or "Method" in Bengali. -->
+		<!-- This XPC service is intended to be bundled with the main Portmaster application. -->
+		<!-- The ServiceType "Application" means it runs within the app's sandbox if the app is sandboxed. -->
+		<!-- If this were a privileged helper tool installed in /Library/PrivilegedHelperTools, -->
+		<!-- it would be different and likely involve SMJobBless. -->
+		<!-- For now, assuming it's a regular XPC service bundled with the app. -->
+	</dict>
+</dict>
+</plist>
