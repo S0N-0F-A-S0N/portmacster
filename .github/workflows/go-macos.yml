@@ -35,10 +35,11 @@ jobs:
         with:
           go-version: '^1.21'
 
-      - name: Build
+      - name: Build all binaries
         run: |
           mkdir -p build
-          go build -o build/portmacster .
+          go build -o build/portmaster-core ./cmds/portmaster-core
+          go build -o build/portmaster-start ./cmds/portmaster-start
 
       - name: Create .zip and .dmg
         run: |
