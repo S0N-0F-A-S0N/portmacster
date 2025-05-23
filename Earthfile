@@ -75,8 +75,13 @@ build:
     # Build macOS Network Extension
     # ./dist/darwin_amd64/PortmasterTunnelProvider.appex
     # ./dist/darwin_arm64/PortmasterTunnelProvider.appex
+    # This target now attempts to run a build script.
     BUILD +kext-build-macos --target="x86_64-apple-darwin"
     BUILD +kext-build-macos --target="aarch64-apple-darwin"
+
+    # Build macOS XPC Service (placeholder for staging files & running build script)
+    # This target now attempts to run a build script.
+    BUILD +xpc-service-macos
 
 build-spn:
     BUILD +go-build --CMDS="hub" --GOOS="linux"   --GOARCH="amd64"
@@ -682,45 +687,36 @@ kext-build-macos:
     RUN echo "Building macOS Network Extension for target ${target}..."
     # This target will need to be significantly more complex, involving:
     # 1. Compiling the Swift code (likely using xcodebuild).
-    # 2. Compiling the Go CGo code into a static library.
-    # 3. Linking the Go static library into the Swift extension.
-    # 4. Packaging the .appex bundle.
+    # 2. Packaging the .appex bundle.
+    #
+    # The actual compilation and bundling of the .appex for the System Extension
+    # must be handled by Xcode and xcodebuild, as it requires specific SDKs,
+    # code signing, and packaging not managed by Earthly directly for Swift projects.
+    # Earthly can be used to prepare source files or trigger xcodebuild if needed.
+    # Example xcodebuild command (to be run in an environment with Xcode set up):
+    #   xcodebuild -project YourApp.xcodeproj -scheme PortmasterTunnelProviderScheme \
+    #              -sdk macosx -configuration Release \
+    #              CODE_SIGN_IDENTITY="Apple Developer: Your Name (TEAMID)" \
+    #              PROVISIONING_PROFILE_SPECIFIER="Your Provisioning Profile Name"
+    #
+    # This Earthly target currently creates a placeholder .appex file by running a script.
 
-    # Step 2: Compile Go CGo bridge code (illustrative)
-    # The GOOS and GOARCH should align with the macOS target.
-    # For example, if target is 'aarch64-apple-darwin', GOOS='darwin', GOARCH='arm64'.
-    # This requires RUST_TO_GO_ARCH_STRING to correctly parse darwin targets.
     DO +RUST_TO_GO_ARCH_STRING --rustTarget="${target}"
-    RUN echo "Building Go bridge for ${GOOS}/${GOARCH}"
-    # The output of this would typically be a .a file (e.g., macos_bridge.a)
-    # This command is a simplified representation. CGO_ENABLED=1 is crucial.
-    # The actual build command would need to specify the output type as a C archive.
-    # FROM +go-base is used to get the Go environment.
-    FROM +go-base AS go-bridge-builder
-    ARG target # Propagate target to this stage
-    WORKDIR /app/service/firewall/interception/macos
-    # This is a conceptual step. A real CGo build for a static library would be like:
-    # RUN go build -buildmode=c-archive -o macos_bridge.a .
-    # For now, we'll just create a dummy file to represent the library.
-    RUN echo "Go bridge compiled for ${target}" > "macos_bridge_${target}.a"
-    RUN mkdir -p "/build_output/macos_bridge/${target}/lib"
-    RUN cp "macos_bridge_${target}.a" "/build_output/macos_bridge/${target}/lib/"
-    RUN cp "macos-bridge.h" "/build_output/macos_bridge/${target}/include/"
+    WORKDIR /app/build-stage-ext
+    COPY service/firewall/interception/macos/PortmasterTunnelProvider.swift .
+    COPY service/firewall/interception/macos/PortmasterTunnelProvider.entitlements .
+    COPY service/firewall/interception/macos/PortmasterXPCServicable.swift . # If needed by extension build
+    COPY service/firewall/interception/macos/build_extension.sh .
+    COPY macos-app-placeholder/Info.plist ./PlaceholderAppInfo.plist # For context
 
-
-    # In a real scenario, the Swift compilation (xcodebuild) would then be configured
-    # to link against macos_bridge.a and include macos-bridge.h.
-    # This is complex to orchestrate solely within Earthly without an existing Xcode project setup.
-
-    RUN echo "Simulating Swift extension build and packaging for ${target}..."
+    RUN chmod +x build_extension.sh
+    RUN ./build_extension.sh
+    
+    # Save the dummy success file and a placeholder .appex
     RUN mkdir -p "${outputDir}/${GO_ARCH_STRING}"
-    # Create a dummy .appex file
-    RUN echo "Placeholder macOS Extension for ${target}" > "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex"
-    # Copy the dummy Go library artifact as well, to show it's part of the output
-    RUN cp "/build_output/macos_bridge/${target}/lib/macos_bridge_${target}.a" "${outputDir}/${GO_ARCH_STRING}/"
-
+    RUN echo "Placeholder macOS Extension for ${target} (built via script)" > "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex"
+    SAVE ARTIFACT --keep-ts PortmasterTunnelProvider.appex_built_SUCCESS AS LOCAL "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex_built_SUCCESS"
     SAVE ARTIFACT --keep-ts "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex" AS LOCAL "${outputDir}/${GO_ARCH_STRING}/PortmasterTunnelProvider.appex"
-    SAVE ARTIFACT --keep-ts "${outputDir}/${GO_ARCH_STRING}/macos_bridge_${target}.a" AS LOCAL "${outputDir}/${GO_ARCH_STRING}/macos_bridge.a"
 
 # Build the macOS XPC Service (Objective-C).
 # This target simulates the packaging of the XPC service. Actual compilation
@@ -729,24 +725,27 @@ xpc-service-macos:
     FROM alpine # Using a minimal image as we are just copying files
     ARG target="all_macos" # Could be x86_64-apple-darwin or aarch64-apple-darwin if specific resources were needed
 
-    WORKDIR /app
+    WORKDIR /app/build-stage-xpc
 
-    # Copy the Objective-C XPC service source files
-    COPY macos-xpc-service ./macos-xpc-service
+    # Copy the Objective-C XPC service source files from their actual nested location
+    COPY service/firewall/interception/macos/xpcservice/macos-xpc-service ./macos-xpc-service-src
+    COPY service/firewall/interception/macos/xpcservice/build_xpc_service.sh .
+    # Also copy related Swift protocol if it's needed for context during build (though Obj-C doesn't directly compile Swift)
+    COPY service/firewall/interception/macos/PortmasterXPCServicable.swift ./macos-xpc-service-src/
+    COPY macos-app-placeholder/Info.plist ./PlaceholderAppInfo.plist # For context
 
-    # Create a placeholder .xpc bundle structure (conceptual)
-    # In a real build, xcodebuild would create this.
-    RUN mkdir -p "${outputDir}/${target}/PortmasterXPC.xpc/Contents"
-    RUN cp ./macos-xpc-service/Info.plist "${outputDir}/${target}/PortmasterXPC.xpc/Contents/Info.plist"
-    # Simulate copying compiled binary (though we don't compile it here)
-    RUN echo "Placeholder XPC Service Binary" > "${outputDir}/${target}/PortmasterXPC.xpc/Contents/MacOS_PortmasterXPC"
-    # Copy source files into a subdirectory for reference, as they aren't compiled by this Earthly target.
-    RUN cp -r ./macos-xpc-service "${outputDir}/${target}/PortmasterXPC.xpc/Contents/Resources/sources"
-
-
-    # Save the placeholder .xpc bundle as an artifact.
-    # The GO_ARCH_STRING might not be directly applicable if it's a universal binary,
-    # but we'll use a generic name for now.
+    RUN chmod +x build_xpc_service.sh
+    # The script expects source files to be in a subdirectory ./macos-xpc-service relative to its execution.
+    # We copied them into ./macos-xpc-service-src, so we'll cd into that before running.
+    # However, the script itself doesn't use the path, it's more for the xcodebuild example.
+    # For the placeholder, it just creates a file in its current directory.
+    RUN (cd macos-xpc-service-src && ../build_xpc_service.sh)
+    
+    # Save the dummy success file and a placeholder .xpc
+    RUN mkdir -p "${outputDir}/${target}/PortmasterXPC.xpc/Contents/MacOS"
+    RUN echo "Placeholder XPC Service for ${target} (built via script)" > "${outputDir}/${target}/PortmasterXPC.xpc/Contents/MacOS/PortmasterXPC"
+    # For Earthly, save the success token from where the script ran it (inside macos-xpc-service-src)
+    SAVE ARTIFACT --keep-ts macos-xpc-service-src/PortmasterXPC.xpc_built_SUCCESS AS LOCAL "${outputDir}/${target}/PortmasterXPC.xpc_built_SUCCESS"
     SAVE ARTIFACT --keep-ts "${outputDir}/${target}/PortmasterXPC.xpc" AS LOCAL "${outputDir}/macos_all/PortmasterXPC.xpc"
 
 
