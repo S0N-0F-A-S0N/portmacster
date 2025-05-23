@@ -19,6 +19,9 @@ on:
       - 'runtime/**'
       - 'service/**'
       - 'spn/**'
+  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build-macos:
