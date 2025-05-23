@@ -2,13 +2,26 @@ name: Tauri macOS Build
 
 on:
   push:
-    branches: [feat/macos-initial-implementation]
+    branches:
+      - feat/macos-initial-implementation
     paths:
-      - 'desktop/tauri/**'
+      - '**.go'
+      - 'cmds/**'
+      - 'runtime/**'
+      - 'service/**'
+      - 'spn/**'
   pull_request:
-    branches: [feat/macos-initial-implementation]
+    branches:
+      - feat/macos-initial-implementation
     paths:
-      - 'desktop/tauri/**'
+      - '**.go'
+      - 'cmds/**'
+      - 'runtime/**'
+      - 'service/**'
+      - 'spn/**'
+  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build-macos:
