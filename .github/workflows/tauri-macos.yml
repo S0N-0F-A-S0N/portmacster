@@ -5,20 +5,12 @@ on:
     branches:
       - feat/macos-initial-implementation
     paths:
-      - '**.go'
-      - 'cmds/**'
-      - 'runtime/**'
-      - 'service/**'
-      - 'spn/**'
+      - 'desktop/tauri/**'
   pull_request:
     branches:
       - feat/macos-initial-implementation
     paths:
-      - '**.go'
-      - 'cmds/**'
-      - 'runtime/**'
-      - 'service/**'
-      - 'spn/**'
+      - 'desktop/tauri/**'
   workflow_dispatch:
   release:
     types: [published]
