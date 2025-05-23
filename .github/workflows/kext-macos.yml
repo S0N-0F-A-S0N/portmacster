@@ -9,6 +9,9 @@ on:
     branches: [feat/macos-initial-implementation]
     paths:
       - 'macos_kext/**'
+  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build-macos:
