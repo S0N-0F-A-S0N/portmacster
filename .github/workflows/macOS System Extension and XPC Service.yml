@@ -4,8 +4,8 @@ on:
   push:
     paths:
       - 'service/firewall/interception/macos/**'
-      - 'macos-app-placeholder/**' # If changes here affect NE/XPC bundling
-      - 'Earthfile' # If Earthfile changes affect these targets
+      - 'macos-app-placeholder/**'
+      - 'Earthfile'
     branches:
       - master
       - develop
@@ -19,30 +19,34 @@ on:
       - develop
 
 jobs:
-  build:
+  build_macos_native:
+    name: Build macOS Network Extension and XPC Service
     runs-on: macos-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Docker
-        run: |
-          brew install --cask docker
-          open /Applications/Docker.app
-          sleep 10
-          docker --version
+    - name: Setup Earthly
+      uses: earthly/actions-setup@v1
+      with:
+        version: v0.8.0
 
-      - name: Log in to Docker
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+    # Add this step to install Docker
+    - name: Install Docker
+      run: |
+        brew install --cask docker
+        open -g -a Docker
+        while ! docker system info > /dev/null 2>&1; do sleep 1; done
 
-      - name: Cache Earthly
-        uses: actions/cache@v3
-        with:
-          path: ~/.earthly
-          key: earthly-cache-macOS-ARM64-${{ runner.os }}-${{ hashFiles('**/earthly.config') }}
-          restore-keys: |
-            earthly-cache-macOS-ARM64-${{ runner.os }}-
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run macOS Native Builds via Earthly
+      run: |
+        earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +kext-build-macos
+        earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +xpc-service-macos
