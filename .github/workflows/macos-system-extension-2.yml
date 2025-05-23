@@ -1,0 +1,36 @@
+name: macOS System Extension & XPC Service
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        run: |
+          brew install --cask docker
+          open /Applications/Docker.app
+          sleep 10
+        env:
+          PATH: "/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
+      - name: Verify Docker Installation
+        run: docker --version
+
+      - name: Cache Earthly dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.earthly
+          key: earthly-cache-macOS-ARM64-${{ runner.os }}-${{ hashFiles('**/earthly-config') }}
+          restore-keys: |
+            earthly-cache-macOS-ARM64-${{ runner.os }}-
+
+      - name: Run Earthly
+        run: earthly +build
