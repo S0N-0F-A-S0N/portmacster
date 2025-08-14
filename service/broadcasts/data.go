@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/safing/portmaster/base/config"
+	"github.com/safing/portmaster/service/core"
 	"github.com/safing/portmaster/service/intel/geoip"
 	"github.com/safing/portmaster/service/netenv"
-	"github.com/safing/portmaster/service/updates"
 	"github.com/safing/portmaster/spn/access"
 	"github.com/safing/portmaster/spn/access/account"
 	"github.com/safing/portmaster/spn/captain"
@@ -19,7 +19,7 @@ func collectData() interface{} {
 	data := make(map[string]interface{})
 
 	// Get data about versions.
-	versions := updates.GetSimpleVersions()
+	versions := core.GetSimpleVersions()
 	data["Updates"] = versions
 	data["Version"] = versions.Build.Version
 	numericVersion, err := MakeNumericVersion(versions.Build.Version)

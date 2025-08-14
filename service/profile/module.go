@@ -3,25 +3,20 @@ package profile
 import (
 	"errors"
 	"fmt"
-	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/safing/portmaster/base/config"
 	"github.com/safing/portmaster/base/database"
 	"github.com/safing/portmaster/base/database/migration"
-	"github.com/safing/portmaster/base/dataroot"
 	"github.com/safing/portmaster/base/log"
 	"github.com/safing/portmaster/base/utils"
 	_ "github.com/safing/portmaster/service/core/base"
 	"github.com/safing/portmaster/service/mgr"
 	"github.com/safing/portmaster/service/profile/binmeta"
-	"github.com/safing/portmaster/service/updates"
 )
 
-var (
-	migrations  = migration.New("core:migrations/profile")
-	updatesPath string
-)
+var migrations = migration.New("core:migrations/profile")
 
 // Events.
 const (
@@ -71,21 +66,24 @@ func prep() error {
 	}
 
 	// Setup icon storage location.
-	iconsDir := dataroot.Root().ChildDir("databases", utils.AdminOnlyPermission).ChildDir("icons", utils.AdminOnlyPermission)
-	if err := iconsDir.Ensure(); err != nil {
-		return fmt.Errorf("failed to create/check icons directory: %w", err)
+	databaseDir := filepath.Join(module.instance.DataDir(), "databases")
+	// Ensure folder existents and permission
+	err := utils.EnsureDirectory(databaseDir, utils.AdminOnlyExecPermission)
+	if err != nil {
+		return fmt.Errorf("failed to ensure directory existence %s: %w", databaseDir, err)
 	}
-	binmeta.ProfileIconStoragePath = iconsDir.Path
+	iconsDir := filepath.Join(databaseDir, "icons")
+	err = utils.EnsureDirectory(iconsDir, utils.AdminOnlyExecPermission)
+	if err != nil {
+		return fmt.Errorf("failed to ensure directory existence %s: %w", iconsDir, err)
+	}
+
+	binmeta.ProfileIconStoragePath = iconsDir
 
 	return nil
 }
 
 func start() error {
-	updatesPath = updates.RootPath()
-	if updatesPath != "" {
-		updatesPath += string(os.PathSeparator)
-	}
-
 	if err := loadProfilesMetadata(); err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			log.Warningf("profile: failed to load profiles metadata, falling back to empty state: %s", err)
@@ -162,5 +160,6 @@ func NewModule(instance instance) (*ProfileModule, error) {
 }
 
 type instance interface {
+	DataDir() string
 	Config() *config.Config
 }

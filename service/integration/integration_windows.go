@@ -9,7 +9,6 @@ import (
 
 	"github.com/safing/portmaster/base/log"
 	"github.com/safing/portmaster/service/mgr"
-	"github.com/safing/portmaster/service/updates"
 	"golang.org/x/sys/windows"
 )
 
@@ -27,7 +26,7 @@ func (i *OSIntegration) Initialize() error {
 
 		callbackLock := sync.Mutex{}
 		// listen for event from the updater and try to load again if any.
-		i.instance.Updates().EventResourcesUpdated.AddCallback("core-dll-loader", func(wc *mgr.WorkerCtx, s struct{}) (cancel bool, err error) {
+		i.instance.BinaryUpdates().EventResourcesUpdated.AddCallback("core-dll-loader", func(wc *mgr.WorkerCtx, s struct{}) (cancel bool, err error) {
 			// Make sure no multiple callas are executed at the same time.
 			callbackLock.Lock()
 			defer callbackLock.Unlock()
@@ -50,7 +49,7 @@ func (i *OSIntegration) Initialize() error {
 
 func (i *OSIntegration) loadDLL() error {
 	// Find path to the dll.
-	file, err := updates.GetPlatformFile("dll/portmaster-core.dll")
+	file, err := i.instance.BinaryUpdates().GetFile("portmaster-core.dll")
 	if err != nil {
 		return err
 	}

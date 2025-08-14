@@ -45,23 +45,27 @@ func (fl *FilterLists) Stop() error {
 	return stop()
 }
 
-// booleans mainly used to decouple the module
-// during testing.
 var (
+	moduleInitDone chan struct{}
+
+	// booleans mainly used to decouple the module during testing.
 	ignoreUpdateEvents = abool.New()
 	ignoreNetEnvEvents = abool.New()
 )
 
 func init() {
+	moduleInitDone = make(chan struct{})
+
 	ignoreNetEnvEvents.Set()
 }
 
 func prep() error {
-	module.instance.Updates().EventResourcesUpdated.AddCallback("Check for blocklist updates",
+	module.instance.IntelUpdates().EventResourcesUpdated.AddCallback("Check for blocklist updates",
 		func(wc *mgr.WorkerCtx, s struct{}) (bool, error) {
 			if ignoreUpdateEvents.IsSet() {
 				return false, nil
 			}
+			log.Debugf("performing filter list update")
 
 			return false, tryListUpdate(wc.Ctx())
 		})
@@ -86,6 +90,10 @@ func start() error {
 	filterListLock.Lock()
 	defer filterListLock.Unlock()
 
+	// Signal that the module has been initialized.
+	// This indicates that the module is ready for use, with the default filter
+	defer close(moduleInitDone)
+
 	ver, err := getCacheDatabaseVersion()
 	if err == nil {
 		log.Debugf("intel/filterlists: cache database has version %s", ver.String())
@@ -107,6 +115,7 @@ func start() error {
 }
 
 func stop() error {
+	moduleInitDone = make(chan struct{})
 	filterListsLoaded = make(chan struct{})
 	return nil
 }
@@ -141,6 +150,6 @@ func New(instance instance) (*FilterLists, error) {
 }
 
 type instance interface {
-	Updates() *updates.Updates
+	IntelUpdates() *updates.Updater
 	NetEnv() *netenv.NetEnv
 }

@@ -72,7 +72,7 @@ type Profile struct { //nolint:maligned // not worth the effort
 	// Icons holds a list of icons to represent the application.
 	Icons []binmeta.Icon
 
-	// Deprecated: LinkedPath used to point to the executableis this
+	// Deprecated: LinkedPath used to point to the executables this
 	// profile was created for.
 	// Until removed, it will be added to the Fingerprints as an exact path match.
 	LinkedPath string // constant
@@ -197,7 +197,7 @@ func (profile *Profile) parseConfig() error {
 	if ok {
 		profile.filterListIDs, err = filterlists.ResolveListIDs(list)
 		if err != nil {
-			lastErr = err
+			log.Warningf("profiles: failed to resolve filter list IDs: %s", err)
 		} else {
 			profile.filterListsSet = true
 		}
@@ -538,13 +538,14 @@ func (profile *Profile) updateMetadataFromSystem(ctx context.Context, md Matchin
 		}
 
 		// Apply new icon if found.
-		if newIcon != nil {
+		if newIcon != nil && !profile.iconExists(newIcon) {
 			if len(profile.Icons) == 0 {
 				profile.Icons = []binmeta.Icon{*newIcon}
 			} else {
 				profile.Icons = append(profile.Icons, *newIcon)
 				profile.Icons = binmeta.SortAndCompactIcons(profile.Icons)
 			}
+			changed = true
 		}
 	}()
 
@@ -558,4 +559,14 @@ func (profile *Profile) updateMetadataFromSystem(ctx context.Context, md Matchin
 	}
 
 	return nil
+}
+
+// Checks if the given icon already assigned to the profile.
+func (profile *Profile) iconExists(newIcon *binmeta.Icon) bool {
+	for _, icon := range profile.Icons {
+		if icon.Value == newIcon.Value && icon.Type == newIcon.Type && icon.Source == newIcon.Source {
+			return true
+		}
+	}
+	return false
 }

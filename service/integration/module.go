@@ -45,5 +45,5 @@ func (i *OSIntegration) Stop() error {
 }
 
 type instance interface {
-	Updates() *updates.Updates
+	BinaryUpdates() *updates.Updater
 }

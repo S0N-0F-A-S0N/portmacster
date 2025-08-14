@@ -8,6 +8,7 @@ import (
 
 	"github.com/safing/portmaster/base/database"
 	"github.com/safing/portmaster/service/mgr"
+	"github.com/safing/portmaster/service/updates"
 )
 
 type Broadcasts struct {
@@ -41,10 +42,6 @@ var (
 
 	startOnce sync.Once
 )
-
-func init() {
-	// module = modules.Register("broadcasts", prep, start, nil, "updates", "netenv", "notifications")
-}
 
 func prep() error {
 	// Register API endpoints.
@@ -91,4 +88,6 @@ func New(instance instance) (*Broadcasts, error) {
 	return module, nil
 }
 
-type instance interface{}
+type instance interface {
+	IntelUpdates() *updates.Updater
+}

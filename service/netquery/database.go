@@ -17,7 +17,6 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 
 	"github.com/safing/portmaster/base/config"
-	"github.com/safing/portmaster/base/dataroot"
 	"github.com/safing/portmaster/base/log"
 	"github.com/safing/portmaster/base/utils"
 	"github.com/safing/portmaster/service/netquery/orm"
@@ -128,13 +127,14 @@ type (
 // Note that write connections are serialized by the Database object before being
 // handed over to SQLite.
 func New(dbPath string) (*Database, error) {
-	historyParentDir := dataroot.Root().ChildDir("databases", utils.AdminOnlyPermission)
-	if err := historyParentDir.Ensure(); err != nil {
+	historyParentDir := filepath.Join(module.instance.DataDir(), "databases")
+	err := utils.EnsureDirectory(historyParentDir, utils.AdminOnlyExecPermission)
+	if err != nil {
 		return nil, fmt.Errorf("failed to ensure database directory exists: %w", err)
 	}
 
 	// Get file location of history database.
-	historyFile := filepath.Join(historyParentDir.Path, "history.db")
+	historyFile := filepath.Join(historyParentDir, "history.db")
 	// Convert to SQLite URI path.
 	historyURI := "file:///" + strings.TrimPrefix(filepath.ToSlash(historyFile), "/")
 
@@ -226,13 +226,14 @@ func (db *Database) Close() error {
 
 // VacuumHistory rewrites the history database in order to purge deleted records.
 func VacuumHistory(ctx context.Context) (err error) {
-	historyParentDir := dataroot.Root().ChildDir("databases", utils.AdminOnlyPermission)
-	if err := historyParentDir.Ensure(); err != nil {
+	historyParentDir := filepath.Join(module.instance.DataDir(), "databases")
+	err = utils.EnsureDirectory(historyParentDir, utils.AdminOnlyExecPermission)
+	if err != nil {
 		return fmt.Errorf("failed to ensure database directory exists: %w", err)
 	}
 
 	// Get file location of history database.
-	historyFile := filepath.Join(historyParentDir.Path, "history.db")
+	historyFile := filepath.Join(historyParentDir, "history.db")
 	// Convert to SQLite URI path.
 	historyURI := "file:///" + strings.TrimPrefix(filepath.ToSlash(historyFile), "/")
 

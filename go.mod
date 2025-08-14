@@ -4,11 +4,7 @@ go 1.24
 
 toolchain go1.24.0
 
-// TODO: Remove when https://github.com/tc-hib/winres/pull/4 is released.
-replace github.com/tc-hib/winres => github.com/dhaavi/winres v0.2.2
-
 require (
-	fyne.io/systray v1.11.0
 	github.com/VictoriaMetrics/metrics v1.35.1
 	github.com/Xuanwo/go-locale v1.1.1
 	github.com/aarondl/opt v0.0.0-20230114172057-b91f370c41f0
@@ -18,15 +14,15 @@ require (
 	github.com/awalterschulze/gographviz v2.0.3+incompatible
 	github.com/bluele/gcache v0.0.2
 	github.com/brianvoe/gofakeit v3.18.0+incompatible
-	github.com/cilium/ebpf v0.17.1
-	github.com/coreos/go-iptables v0.8.0
+	github.com/cilium/ebpf v0.16.0
+	github.com/coreos/go-iptables v0.7.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dgraph-io/badger v1.6.2
-	github.com/dhaavi/go-notify v0.0.0-20190209221809-c404b1f22435
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/florianl/go-nfqueue v1.3.2
 	github.com/fogleman/gg v1.3.0
 	github.com/ghodss/yaml v1.0.0
+	github.com/gobwas/glob v0.2.3
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/google/gopacket v1.1.19
@@ -36,11 +32,10 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.7.0
 	github.com/hectane/go-acl v0.0.0-20230122075934-ca0b05cb1adb
-	github.com/jackc/puddle/v2 v2.2.2
-	github.com/lmittmann/tint v1.0.6
-	github.com/maruel/panicparse/v2 v2.4.0
-	github.com/mat/besticon v3.12.0+incompatible
-	github.com/mattn/go-colorable v0.1.14
+	github.com/jackc/puddle/v2 v2.2.1
+	github.com/lmittmann/tint v1.0.5
+	github.com/maruel/panicparse/v2 v2.3.1
+	github.com/mattn/go-colorable v0.1.13
 	github.com/mattn/go-isatty v0.0.20
 	github.com/miekg/dns v1.1.62
 	github.com/mitchellh/copystructure v1.2.0
@@ -62,7 +57,7 @@ require (
 	github.com/tannerryan/ring v1.1.2
 	github.com/tc-hib/winres v0.3.1
 	github.com/tevino/abool v1.2.0
-	github.com/tidwall/gjson v1.18.0
+	github.com/tidwall/gjson v1.17.3
 	github.com/tidwall/sjson v1.2.5
 	github.com/umahmood/haversine v0.0.0-20151105152445-808ab04add26
 	github.com/varlink/go v0.4.0
@@ -78,8 +73,9 @@ require (
 	zombiezen.com/go/sqlite v1.3.0
 )
 
+require github.com/sergeymakinen/go-bmp v1.0.0 // indirect
+
 require (
-	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
@@ -87,6 +83,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3 // indirect
 	github.com/aarondl/json v0.0.0-20221020222930-8b0db17ef1bf // indirect
 	github.com/aead/ecdh v0.2.0 // indirect
+	github.com/alessio/shellescape v1.4.2 // indirect
 	github.com/bgentry/speakeasy v0.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
@@ -103,13 +100,12 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-sql-driver/mysql v1.7.2-0.20231213112541-0004702b931d // indirect
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
-	github.com/godbus/dbus v4.1.0+incompatible // indirect
 	github.com/godror/godror v0.40.4 // indirect
 	github.com/godror/knownpb v0.1.1 // indirect
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/gddo v0.0.0-20210115222349-20d68f94ee1f // indirect
-	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
+	github.com/golang/glog v1.2.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -145,6 +141,7 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/seehuhn/sha256d v1.0.0 // indirect
+	github.com/sergeymakinen/go-ico v1.0.0-beta.0
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
@@ -163,7 +160,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zalando/go-keyring v0.2.6 // indirect
+	github.com/zalando/go-keyring v0.2.5 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/mod v0.20.0 // indirect

@@ -13,12 +13,15 @@ import (
 	"github.com/safing/portmaster/base/notifications"
 	"github.com/safing/portmaster/base/rng"
 	"github.com/safing/portmaster/base/runtime"
+	"github.com/safing/portmaster/base/utils"
+	"github.com/safing/portmaster/service"
 	"github.com/safing/portmaster/service/core"
 	"github.com/safing/portmaster/service/core/base"
 	"github.com/safing/portmaster/service/intel/filterlists"
 	"github.com/safing/portmaster/service/intel/geoip"
 	"github.com/safing/portmaster/service/mgr"
 	"github.com/safing/portmaster/service/netenv"
+	"github.com/safing/portmaster/service/ui"
 	"github.com/safing/portmaster/service/updates"
 	"github.com/safing/portmaster/spn/access"
 	"github.com/safing/portmaster/spn/cabin"
@@ -34,9 +37,16 @@ import (
 
 // Instance is an instance of a Portmaster service.
 type Instance struct {
-	ctx          context.Context
-	cancelCtx    context.CancelFunc
+	ctx       context.Context
+	cancelCtx context.CancelFunc
+
+	shutdownCtx       context.Context
+	cancelShutdownCtx context.CancelFunc
+
 	serviceGroup *mgr.Group
+
+	binDir  string
+	dataDir string
 
 	exitCode atomic.Int32
 
@@ -48,11 +58,12 @@ type Instance struct {
 	runtime  *runtime.Runtime
 	rng      *rng.Rng
 
-	core        *core.Core
-	updates     *updates.Updates
-	geoip       *geoip.GeoIP
-	netenv      *netenv.NetEnv
-	filterLists *filterlists.FilterLists
+	core          *core.Core
+	binaryUpdates *updates.Updater
+	intelUpdates  *updates.Updater
+	geoip         *geoip.GeoIP
+	netenv        *netenv.NetEnv
+	filterLists   *filterlists.FilterLists
 
 	access    *access.Access
 	cabin     *cabin.Cabin
@@ -64,17 +75,33 @@ type Instance struct {
 	ships     *ships.Ships
 	sluice    *sluice.SluiceModule
 	terminal  *terminal.TerminalModule
+	ui        *ui.UI
 
 	CommandLineOperation func() error
+	ShouldRestart        bool
 }
 
 // New returns a new Portmaster service instance.
-func New() (*Instance, error) {
-	// Create instance to pass it to modules.
-	instance := &Instance{}
-	instance.ctx, instance.cancelCtx = context.WithCancel(context.Background())
+func New(svcCfg *service.ServiceConfig) (*Instance, error) {
+	// Initialize config.
+	err := svcCfg.Init()
+	if err != nil {
+		return nil, fmt.Errorf("internal service config error: %w", err)
+	}
 
-	var err error
+	// Make sure data dir exists, so that child directories don't dictate the permissions.
+	err = utils.EnsureDirectory(svcCfg.DataDir, utils.PublicReadExecPermission)
+	if err != nil {
+		return nil, fmt.Errorf("data directory %s is not accessible: %w", svcCfg.DataDir, err)
+	}
+
+	// Create instance to pass it to modules.
+	instance := &Instance{
+		binDir:  svcCfg.BinDir,
+		dataDir: svcCfg.DataDir,
+	}
+	instance.ctx, instance.cancelCtx = context.WithCancel(context.Background())
+	instance.shutdownCtx, instance.cancelShutdownCtx = context.WithCancel(context.Background())
 
 	// Base modules
 	instance.base, err = base.New(instance)
@@ -107,13 +134,26 @@ func New() (*Instance, error) {
 	}
 
 	// Service modules
+	binaryUpdateConfig, intelUpdateConfig, err := service.MakeUpdateConfigs(svcCfg)
+	if err != nil {
+		return instance, fmt.Errorf("create updates config: %w", err)
+	}
+
+	//Enable autodownload and autoapply
+	binaryUpdateConfig.AutoDownload = true
+	binaryUpdateConfig.AutoApply = true
+
+	instance.binaryUpdates, err = updates.New(instance, "Binary Updater", *binaryUpdateConfig)
+	if err != nil {
+		return instance, fmt.Errorf("create updates module: %w", err)
+	}
+	instance.intelUpdates, err = updates.New(instance, "Intel Updater", *intelUpdateConfig)
+	if err != nil {
+		return instance, fmt.Errorf("create updates module: %w", err)
+	}
 	instance.core, err = core.New(instance)
 	if err != nil {
 		return instance, fmt.Errorf("create core module: %w", err)
-	}
-	instance.updates, err = updates.New(instance)
-	if err != nil {
-		return instance, fmt.Errorf("create updates module: %w", err)
 	}
 	instance.geoip, err = geoip.New(instance)
 	if err != nil {
@@ -181,7 +221,8 @@ func New() (*Instance, error) {
 		instance.rng,
 
 		instance.core,
-		instance.updates,
+		instance.binaryUpdates,
+		instance.intelUpdates,
 		instance.geoip,
 		instance.netenv,
 
@@ -220,6 +261,18 @@ func (i *Instance) SetSleep(enabled bool) {
 	}
 }
 
+// BinDir returns the directory for binaries.
+// This directory may be read-only.
+func (i *Instance) BinDir() string {
+	return i.binDir
+}
+
+// DataDir returns the directory for variable data.
+// This directory is expected to be read/writeable.
+func (i *Instance) DataDir() string {
+	return i.dataDir
+}
+
 // Database returns the database module.
 func (i *Instance) Database() *dbmodule.DBModule {
 	return i.database
@@ -255,9 +308,14 @@ func (i *Instance) Base() *base.Base {
 	return i.base
 }
 
-// Updates returns the updates module.
-func (i *Instance) Updates() *updates.Updates {
-	return i.updates
+// BinaryUpdates returns the updates module.
+func (i *Instance) BinaryUpdates() *updates.Updater {
+	return i.binaryUpdates
+}
+
+// IntelUpdates returns the updates module.
+func (i *Instance) IntelUpdates() *updates.Updater {
+	return i.intelUpdates
 }
 
 // GeoIP returns the geoip module.
@@ -320,6 +378,11 @@ func (i *Instance) Terminal() *terminal.TerminalModule {
 	return i.terminal
 }
 
+// UI returns the ui module.
+func (i *Instance) UI() *ui.UI {
+	return i.ui
+}
+
 // FilterLists returns the filterLists module.
 func (i *Instance) FilterLists() *filterlists.FilterLists {
 	return i.filterLists
@@ -360,12 +423,6 @@ func (i *Instance) Ready() bool {
 	return i.serviceGroup.Ready()
 }
 
-// Ctx returns the instance context.
-// It is only canceled on shutdown.
-func (i *Instance) Ctx() context.Context {
-	return i.ctx
-}
-
 // Start starts the instance.
 func (i *Instance) Start() error {
 	return i.serviceGroup.Start()
@@ -373,7 +430,6 @@ func (i *Instance) Start() error {
 
 // Stop stops the instance and cancels the instance context when done.
 func (i *Instance) Stop() error {
-	defer i.cancelCtx()
 	return i.serviceGroup.Stop()
 }
 
@@ -387,6 +443,8 @@ func (i *Instance) Restart() {
 	i.core.EventRestart.Submit(struct{}{})
 	time.Sleep(10 * time.Millisecond)
 
+	// Set the restart flag and shutdown.
+	i.ShouldRestart = true
 	i.shutdown(RestartExitCode)
 }
 
@@ -400,35 +458,81 @@ func (i *Instance) Shutdown() {
 }
 
 func (i *Instance) shutdown(exitCode int) {
+	// Only shutdown once.
+	if i.IsShuttingDown() {
+		return
+	}
+
+	// Cancel main  context.
+	i.cancelCtx()
+
 	// Set given exit code.
 	i.exitCode.Store(int32(exitCode))
 
+	// Start shutdown asynchronously in a separate manager.
 	m := mgr.New("instance")
 	m.Go("shutdown", func(w *mgr.WorkerCtx) error {
-		for {
-			if err := i.Stop(); err != nil {
-				w.Error("failed to shutdown", "err", err, "retry", "1s")
-				time.Sleep(1 * time.Second)
-			} else {
-				return nil
-			}
+		// Stop all modules.
+		if err := i.Stop(); err != nil {
+			w.Error("failed to shutdown", "err", err)
 		}
+
+		// Cancel shutdown process context.
+		i.cancelShutdownCtx()
+		return nil
 	})
 }
 
-// Stopping returns whether the instance is shutting down.
-func (i *Instance) Stopping() bool {
-	return i.ctx.Err() == nil
+// Ctx returns the instance context.
+// It is canceled when shutdown is started.
+func (i *Instance) Ctx() context.Context {
+	return i.ctx
 }
 
-// Stopped returns a channel that is triggered when the instance has shut down.
-func (i *Instance) Stopped() <-chan struct{} {
+// IsShuttingDown returns whether the instance is shutting down.
+func (i *Instance) IsShuttingDown() bool {
+	return i.ctx.Err() != nil
+}
+
+// ShuttingDown returns a channel that is triggered when the instance starts shutting down.
+func (i *Instance) ShuttingDown() <-chan struct{} {
 	return i.ctx.Done()
+}
+
+// ShutdownCtx returns the instance shutdown context.
+// It is canceled when shutdown is complete.
+func (i *Instance) ShutdownCtx() context.Context {
+	return i.shutdownCtx
+}
+
+// IsShutDown returns whether the instance has stopped.
+func (i *Instance) IsShutDown() bool {
+	return i.shutdownCtx.Err() != nil
+}
+
+// ShutDownComplete returns a channel that is triggered when the instance has shut down.
+func (i *Instance) ShutdownComplete() <-chan struct{} {
+	return i.shutdownCtx.Done()
 }
 
 // ExitCode returns the set exit code of the instance.
 func (i *Instance) ExitCode() int {
 	return int(i.exitCode.Load())
+}
+
+// ShouldRestartIsSet returns whether the service/instance should be restarted.
+func (i *Instance) ShouldRestartIsSet() bool {
+	return i.ShouldRestart
+}
+
+// CommandLineOperationIsSet returns whether the command line option is set.
+func (i *Instance) CommandLineOperationIsSet() bool {
+	return i.CommandLineOperation != nil
+}
+
+// CommandLineOperationExecute executes the set command line option.
+func (i *Instance) CommandLineOperationExecute() error {
+	return i.CommandLineOperation()
 }
 
 // SPNGroup fakes interface conformance.

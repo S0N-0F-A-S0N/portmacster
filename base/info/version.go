@@ -152,6 +152,28 @@ func FullVersion() string {
 	return builder.String()
 }
 
+// CondensedVersion returns the rather complete, but condensed version string.
+func CondensedVersion() string {
+	info := GetInfo()
+
+	cgoInfo := "-cgo"
+	if info.CGO {
+		cgoInfo = "+cgo"
+	}
+	dirtyInfo := "clean"
+	if info.Dirty {
+		dirtyInfo = "dirty"
+	}
+
+	return fmt.Sprintf(
+		"%s %s (%s/%s; built with %s [%s %s] from %s [%s] at %s)",
+		info.Name, version,
+		runtime.GOOS, runtime.GOARCH,
+		runtime.Version(), runtime.Compiler, cgoInfo,
+		info.Commit, dirtyInfo, info.CommitTime,
+	)
+}
+
 // CheckVersion checks if the metadata is ok.
 func CheckVersion() error {
 	switch {

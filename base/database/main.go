@@ -3,14 +3,11 @@ package database
 import (
 	"errors"
 	"fmt"
-
-	"github.com/tevino/abool"
+	"path/filepath"
 
 	"github.com/safing/portmaster/base/utils"
+	"github.com/tevino/abool"
 )
-
-// DatabasesSubDir defines the sub directory where the databases are stored.
-const DatabasesSubDir = "databases"
 
 var (
 	initialized = abool.NewBool(false)
@@ -18,25 +15,18 @@ var (
 	shuttingDown   = abool.NewBool(false)
 	shutdownSignal = make(chan struct{})
 
-	rootStructure      *utils.DirStructure
-	databasesStructure *utils.DirStructure
+	rootDir string
 )
 
-// InitializeWithPath initializes the database at the specified location using a path.
-func InitializeWithPath(dirPath string) error {
-	return Initialize(utils.NewDirStructure(dirPath, utils.PublicReadPermission))
-}
-
-// Initialize initializes the database at the specified location using a dir structure.
-func Initialize(dirStructureRoot *utils.DirStructure) error {
+// Initialize initializes the database at the specified location.
+func Initialize(databasesRootDir string) error {
 	if initialized.SetToIf(false, true) {
-		rootStructure = dirStructureRoot
+		rootDir = databasesRootDir
 
 		// ensure root and databases dirs
-		databasesStructure = rootStructure.ChildDir(DatabasesSubDir, utils.AdminOnlyPermission)
-		err := databasesStructure.Ensure()
+		err := utils.EnsureDirectory(rootDir, utils.AdminOnlyExecPermission)
 		if err != nil {
-			return fmt.Errorf("could not create/open database directory (%s): %w", rootStructure.Path, err)
+			return fmt.Errorf("failed to create/check database dir %q: %w", rootDir, err)
 		}
 
 		return nil
@@ -66,11 +56,12 @@ func Shutdown() (err error) {
 
 // getLocation returns the storage location for the given name and type.
 func getLocation(name, storageType string) (string, error) {
-	location := databasesStructure.ChildDir(name, utils.AdminOnlyPermission).ChildDir(storageType, utils.AdminOnlyPermission)
-	// check location
-	err := location.Ensure()
+	location := filepath.Join(rootDir, name, storageType)
+
+	// Make sure location exists.
+	err := utils.EnsureDirectory(location, utils.AdminOnlyExecPermission)
 	if err != nil {
-		return "", fmt.Errorf(`failed to create/check database dir "%s": %w`, location.Path, err)
+		return "", fmt.Errorf("failed to create/check database dir %q: %w", location, err)
 	}
-	return location.Path, nil
+	return location, nil
 }

@@ -28,18 +28,17 @@
           "takesValue": true
         },
         {
-          "name": "with-notifications",
-          "description": "Enable experimental notifications via Tauri. Replaces the notifier app."
+          "name": "no-notifications",
+          "description": "Disable notifications via Tauri."
         },
         {
-          "name": "with-prompts",
-          "description": "Enable experimental prompt support via Tauri. Replaces the notifier app."
+          "name": "no-prompts",
+          "description": "Disable prompt support via Tauri."
         },
       ]
     }
   },
   "productName": "Portmaster",
-  "version": "0.1.0",
   "identifier": "io.safing.portmaster", // this is added as a property to the shortcut on windows (ApplicationUserModelID). Used for notifications.
   "app": {
     "withGlobalTauri": true,
@@ -55,11 +54,32 @@
     "linux": {
       "deb": {
         "depends": [
-          "libayatana-appindicator3"
+          "libayatana-appindicator3-1"
         ],
         "desktopTemplate": "../../../packaging/linux/portmaster.desktop",
         "files": {
+          // Service file
           "/usr/lib/systemd/system/portmaster.service": "../../../packaging/linux/portmaster.service",
+
+          // Binary files
+          "/usr/lib/portmaster/portmaster-core": "binary/portmaster-core",
+          "/usr/lib/portmaster/portmaster.zip": "binary/portmaster.zip",
+          "/usr/lib/portmaster/assets.zip": "binary/assets.zip",
+
+          // Intel files
+          "/var/lib/portmaster/intel/index.json": "intel/index.json",
+          "/var/lib/portmaster/intel/base.dsdl": "intel/base.dsdl",
+          "/var/lib/portmaster/intel/geoipv4.mmdb": "intel/geoipv4.mmdb",
+          "/var/lib/portmaster/intel/geoipv6.mmdb": "intel/geoipv6.mmdb",
+          "/var/lib/portmaster/intel/index.dsd": "intel/index.dsd",
+          "/var/lib/portmaster/intel/intermediate.dsdl": "intel/intermediate.dsdl",
+          "/var/lib/portmaster/intel/urgent.dsdl": "intel/urgent.dsdl",
+
+          "/var/lib/portmaster/intel/main-intel.yaml"   : "intel/main-intel.yaml",
+          "/var/lib/portmaster/intel/notifications.yaml": "intel/notifications.yaml",
+          "/var/lib/portmaster/intel/news.yaml"         : "intel/news.yaml",
+
+          // Shortcut
           "/etc/xdg/autostart/portmaster.desktop": "../../../packaging/linux/portmaster-autostart.desktop"
         },
         "postInstallScript": "../../../packaging/linux/postinst",
@@ -72,7 +92,28 @@
         "desktopTemplate": "../../../packaging/linux/portmaster.desktop",
         "release": "1",
         "files": {
+          // Service file
           "/usr/lib/systemd/system/portmaster.service": "../../../packaging/linux/portmaster.service",
+
+          // Binary files
+          "/usr/lib/portmaster/portmaster-core": "binary/portmaster-core",
+          "/usr/lib/portmaster/portmaster.zip": "binary/portmaster.zip",
+          "/usr/lib/portmaster/assets.zip": "binary/assets.zip",
+
+          // Intel files
+          "/var/lib/portmaster/intel/index.json": "intel/index.json",
+          "/var/lib/portmaster/intel/base.dsdl": "intel/base.dsdl",
+          "/var/lib/portmaster/intel/geoipv4.mmdb": "intel/geoipv4.mmdb",
+          "/var/lib/portmaster/intel/geoipv6.mmdb": "intel/geoipv6.mmdb",
+          "/var/lib/portmaster/intel/index.dsd": "intel/index.dsd",
+          "/var/lib/portmaster/intel/intermediate.dsdl": "intel/intermediate.dsdl",
+          "/var/lib/portmaster/intel/urgent.dsdl": "intel/urgent.dsdl",
+
+          "/var/lib/portmaster/intel/main-intel.yaml"   : "intel/main-intel.yaml",
+          "/var/lib/portmaster/intel/notifications.yaml": "intel/notifications.yaml",
+          "/var/lib/portmaster/intel/news.yaml"         : "intel/news.yaml",
+
+          // Shortcut
           "/etc/xdg/autostart/portmaster.desktop": "../../../packaging/linux/portmaster-autostart.desktop"
         },
         "postInstallScript": "../../../packaging/linux/postinst",
@@ -82,24 +123,27 @@
     "windows": {
       "nsis": {
         "installMode": "perMachine",
-        "installerHooks": "templates/nsis_install_hooks.nsh",
-        "installerIcon": "../../../assets/data/icons/pm_light.ico"
+        "installerHooks": "templates/nsis/install_hooks.nsh",
+        "installerIcon": "../../../assets/data/icons/pm_light_contrast.ico"
       },
       "wix": {
         "fragmentPaths": [
-          "templates/service.wxs"
+          "templates/wix/files.wxs",
+          "templates/wix/old_service_check.wxs",
+          "templates/wix/migration.wxs",
         ],
-        "template": "templates/main.wxs"
+        "componentGroupRefs": ["BinaryAndIntelFiles"],
+        "template": "templates/wix/main.wxs"
       }
     },
     "targets": [
       "deb",
       "rpm",
-      "nsis",
-      "msi"
+      "nsis"  //,      "msi"
     ],
-    "icon": [
+    "icon": [      
       "../../../assets/data/icons/pm_dark_512.png",
+      "../../../assets/data/icons/pm_light_contrast.ico",
       "../../../assets/data/icons/pm_dark.ico",
       "../../../assets/data/icons/pm_light_512.png",
       "../../../assets/data/icons/pm_light.ico"

@@ -82,6 +82,7 @@ if (location.pathname !== "/prompt") {
 
 } else {
   // bootstrap the prompt interface
+  console.log("[INFO] Bootstrapping prompt entry point.");
   bootstrapApplication(PromptEntryPointComponent, {
     providers: [
       provideHttpClient(),

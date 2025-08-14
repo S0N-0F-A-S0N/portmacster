@@ -8,8 +8,10 @@ on:
       - 'macos-app-placeholder/**'
       - 'Earthfile' # If Earthfile changes affect Tauri's macOS bundling
     branches:
-      - master
-      - develop
+      - main
+      - development
+      - v1-legacy
+      - v1-legacy-develop
 
   pull_request:
     paths:
@@ -18,8 +20,10 @@ on:
       - 'macos-app-placeholder/**'
       - 'Earthfile'
     branches:
-      - master
-      - develop
+      - main
+      - development
+      - v1-legacy
+      - v1-legacy-develop
 
 jobs:
   build:
@@ -40,3 +44,22 @@ jobs:
 
     - name: Build tauri project
       run: earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +tauri-ci
+
+  lint:
+    name: Linter
+    runs-on: ubuntu-latest
+    steps:
+    - uses: earthly/actions-setup@v1
+      with:
+        version: v0.8.0
+    - uses: actions/checkout@v4
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build tauri project
+      run: earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +tauri-lint

@@ -3,12 +3,16 @@ use tauri::{
     image::Image, AppHandle, Listener, Manager, Result, Theme, UserAttentionType, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder,
 };
+use std::sync::{atomic::{AtomicBool, Ordering}};
 
 use crate::{portmaster::PortmasterExt, traymenu};
 
-const LIGHT_PM_ICON: &'static [u8] =
-    include_bytes!("../../../../assets/data/icons/pm_light_512.png");
-const DARK_PM_ICON: &'static [u8] = include_bytes!("../../../../assets/data/icons/pm_dark_512.png");
+const LIGHT_PM_ICON: &[u8] = include_bytes!("../../../../assets/data/icons/pm_light_512.png");
+const DARK_PM_ICON: &[u8] = include_bytes!("../../../../assets/data/icons/pm_dark_512.png");
+
+const CUSTOM_ENVVAR_FOR_WEBVIEW_PROCESS: &str = "PORTMASTER_UI_WEBVIEW_PROCESS";
+
+static UI_PROCESS_ENV_VAR_DEFINED_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Either returns the existing "main" window or creates a new one.
 ///
@@ -25,12 +29,17 @@ pub fn create_main_window(app: &AppHandle) -> Result<WebviewWindow> {
     } else {
         debug!("[tauri] creating main window");
 
+        do_before_any_window_create(); // required operations before window creation
         let res = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
             .title("Portmaster")
             .visible(false)
             .inner_size(1200.0, 700.0)
             .min_inner_size(800.0, 600.0)
             .theme(Some(Theme::Dark))
+            .on_page_load(|_window, _event| {
+                debug!("[tauri] main window page loaded: {}", _event.url());
+                do_after_main_window_created(); // required operations after Main window creation
+            })
             .build();
 
         match res {
@@ -38,6 +47,21 @@ pub fn create_main_window(app: &AppHandle) -> Result<WebviewWindow> {
                 win.once("tauri://error", |event| {
                     error!("failed to open tauri window: {}", event.payload());
                 });
+
+                #[cfg(target_os = "linux")]
+                {
+                    // Workaround for KDE/Wayland environments on Linux:
+                    // On KDE with Wayland, after hiding and showing the window,
+                    // the title-bar buttons (close, minimize, maximize) may stop working.
+                    // Toggling the resizable property appears to resolve this issue.
+                    // Issue: https://github.com/safing/portmaster/issues/1909
+                    // Additional info: https://github.com/tauri-apps/tauri/issues/6162#issuecomment-1423304398
+                    let win_clone = win.clone();
+                    win.listen("tauri://focus", move |event| {
+                        let _ = win_clone.set_resizable(false);
+                        let _ = win_clone.set_resizable(true);
+                    });
+                }
 
                 win
             }
@@ -54,7 +78,7 @@ pub fn create_main_window(app: &AppHandle) -> Result<WebviewWindow> {
     set_window_icon(&window);
 
     #[cfg(debug_assertions)]
-    if let Ok(_) = std::env::var("TAURI_SHOW_IMMEDIATELY") {
+    if std::env::var("TAURI_SHOW_IMMEDIATELY").is_ok() {
         debug!("[tauri] TAURI_SHOW_IMMEDIATELY is set, opening window");
 
         if let Err(err) = window.show() {
@@ -70,6 +94,8 @@ pub fn create_splash_window(app: &AppHandle) -> Result<WebviewWindow> {
         let _ = window.show();
         Ok(window)
     } else {
+
+        do_before_any_window_create(); // required operations before window creation
         let window = WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("index.html".into()))
             .center()
             .closable(false)
@@ -92,14 +118,14 @@ pub fn close_splash_window(app: &AppHandle) -> Result<()> {
         let _ = window.hide();
         return window.destroy();
     }
-    return Err(tauri::Error::WindowNotFound);
+    Err(tauri::Error::WindowNotFound)
 }
 
 pub fn hide_splash_window(app: &AppHandle) -> Result<()> {
     if let Some(window) = app.get_webview_window("splash") {
         return window.hide();
     }
-    return Err(tauri::Error::WindowNotFound);
+    Err(tauri::Error::WindowNotFound)
 }
 
 pub fn set_window_icon(window: &WebviewWindow) {
@@ -119,6 +145,38 @@ pub fn set_window_icon(window: &WebviewWindow) {
     };
 }
 
+/// This function must be called before any window is created.
+/// 
+/// Temporarily sets the environment variable `PORTMASTER_WEBVIEW_UI_PROCESS` to "true".
+/// This ensures that any child process (i.e., the WebView process) spawned during window creation
+/// will inherit this environment variable. This allows portmaster-core to detect that the process
+/// is a child WebView of the main process.
+/// 
+/// IMPORTANT: After the 'Main' window is created, you must call `do_after_main_window_created()` to remove
+/// the environment variable from the main process environment.
+/// This ensures that any subsequent child processes (such as those created by "open external" functionality)
+/// will not inherit this environment variable, correctly indicating that they are not part of the
+/// Portmaster UI WebView process.
+pub fn do_before_any_window_create() {
+    UI_PROCESS_ENV_VAR_DEFINED_FLAG.store(true, Ordering::SeqCst);
+    std::env::set_var(CUSTOM_ENVVAR_FOR_WEBVIEW_PROCESS, "true");
+}
+
+/// This function must be called after the Main window is created.
+/// 
+/// Removes the `PORTMASTER_WEBVIEW_UI_PROCESS` environment variable from the main process.
+/// This ensures that only the child WebView process has the variable set, and the main process
+/// does not retain it.
+pub fn do_after_main_window_created() {
+     let flag_was_set = UI_PROCESS_ENV_VAR_DEFINED_FLAG.compare_exchange(
+        true, false, Ordering::SeqCst, Ordering::SeqCst
+    ).is_ok();
+
+    if flag_was_set {
+        std::env::remove_var(CUSTOM_ENVVAR_FOR_WEBVIEW_PROCESS);
+    }
+} 
+
 /// Opens a window for the tauri application.
 ///
 /// If the main window has already been created, it is instructed to
@@ -135,6 +193,9 @@ pub fn open_window(app: &AppHandle) -> Result<WebviewWindow> {
     if app.portmaster().is_reachable() {
         match app.get_webview_window("main") {
             Some(win) => {
+                if let Ok(true) = win.is_minimized() {
+                    let _ = win.unminimize();
+                }
                 app.portmaster().show_window();
                 let _ = win.show();
                 let _ = win.set_focus();
@@ -182,15 +243,15 @@ pub fn may_navigate_to_ui(win: &mut WebviewWindow, force: bool) {
             // Only for dev build
             // Allow connection to http://localhost:4200
             let capabilities = include_str!("../capabilities/default.json")
-                .replace("http://localhost:817", "http://localhost:4200");
+                .replace("http://127.0.0.1:817", "http://127.0.0.1:4200");
             let _ = win.add_capability(capabilities);
-            debug!("[tauri] navigating to http://localhost:4200");
-            _ = win.navigate("http://localhost:4200".parse().unwrap());
+            debug!("[tauri] navigating to http://127.0.0.1:4200");
+            _ = win.navigate("http://127.0.0.1:4200".parse().unwrap());
         }
 
         #[cfg(not(debug_assertions))]
         {
-            _ = win.navigate("http://localhost:817".parse().unwrap());
+            _ = win.navigate("http://127.0.0.1:817".parse().unwrap());
         }
     } else {
         error!(
